@@ -9,6 +9,5 @@ repository.workspace = true
 [dependencies]
 dh-core.workspace = true
 dh-geometry.workspace = true
-dh-project.workspace = true
 eframe.workspace = true
 glam.workspace = true

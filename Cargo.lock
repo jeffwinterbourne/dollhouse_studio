@@ -635,7 +635,6 @@ version = "0.1.0"
 dependencies = [
  "dh-core",
  "dh-geometry",
- "dh-project",
  "eframe",
  "glam",
 ]
