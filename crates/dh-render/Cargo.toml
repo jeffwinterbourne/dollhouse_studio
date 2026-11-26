@@ -1,0 +1,14 @@
+[package]
+name = "dh-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+dh-core.workspace = true
+dh-geometry.workspace = true
+dh-project.workspace = true
+eframe.workspace = true
+glam.workspace = true

@@ -1,0 +1,11 @@
+[package]
+name = "dh-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+description = "Core domain models, display units, instancing, templates, and undo history for Dollhouse Studio"
+
+[dependencies]
+serde.workspace = true

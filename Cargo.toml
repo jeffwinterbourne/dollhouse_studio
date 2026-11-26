@@ -1,0 +1,43 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/dh-core",
+    "crates/dh-geometry",
+    "crates/dh-project",
+    "crates/dh-export",
+    "crates/dh-render",
+    "crates/dh-app",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+authors = ["Dollhouse Studio Contributors"]
+repository = "https://github.com/jeffwinterbourne/dollhouse_studio"
+
+[workspace.dependencies]
+dh-core = { path = "crates/dh-core" }
+dh-geometry = { path = "crates/dh-geometry" }
+dh-project = { path = "crates/dh-project" }
+dh-export = { path = "crates/dh-export" }
+dh-render = { path = "crates/dh-render" }
+
+eframe = { version = "0.37.0", default-features = false, features = [
+    "accesskit",
+    "default_fonts",
+    "glow",
+    "system_fonts",
+] }
+glam = "0.34.3"
+i_overlay = { version = "9.2.0", features = ["glam"] }
+i_triangle = { version = "0.51.0", features = ["glam"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "bmp", "ico"] }
+rfd = "0.18.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = "symbols"

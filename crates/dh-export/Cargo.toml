@@ -1,0 +1,12 @@
+[package]
+name = "dh-export"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+
+[dependencies]
+dh-core.workspace = true
+dh-geometry.workspace = true
+glam.workspace = true

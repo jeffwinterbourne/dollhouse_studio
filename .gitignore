@@ -1,0 +1,34 @@
+# Build artifacts
+/target
+**/*.rs.bk
+/dist
+
+# Generated 3D / export test artifacts
+*.stl
+*.STL
+*.pdf
+*.svg
+
+# OS & editor files
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Crash recovery & local runtime state
+.autosave/
+*.local
+*.log
+*.env
+*.pem
+*.key
+
+# Assistant / IDE scratch directories
+.gemini/
+.claude/
+.cursor/
+.windsurf/
+CLAUDE.md
