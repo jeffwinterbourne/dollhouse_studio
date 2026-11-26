@@ -1,5 +1,7 @@
+use crate::icons::{VectorIcon, draw_style_thumbnail, paint_icon};
 use crate::theme::{
     StudioPalette, drag_unit_mm, section_card, slider_ratio_pct, slider_u32, slider_unit_mm,
+    slider_unit_mm_extended,
 };
 use dh_core::{
     ArchitraveStyle, ComponentDef, DisplayUnit, DoorHandleStyle, FilamentColor, FlushTopMode,
@@ -7,7 +9,9 @@ use dh_core::{
     ShutterStyle, StandalonePiece, WindowOpeningMode, WindowParams, WindowStyle,
 };
 use dh_geometry::{build_window, validate_generated_piece};
-use eframe::egui::{self, Color32, CornerRadius, Margin, RichText, Stroke};
+use eframe::egui::{
+    self, Color32, CornerRadius, Margin, Rect, RichText, Sense, Stroke, StrokeKind, Vec2,
+};
 
 #[derive(Debug, Clone, Default)]
 pub struct InspectorState {
@@ -16,6 +20,7 @@ pub struct InspectorState {
 
 #[derive(Debug, Clone)]
 pub enum InspectorAction {
+    HideInspector,
     PromoteOpeningToComponent(String),
     MakeOpeningUnique(String),
     SaveAsTemplate,
@@ -53,9 +58,10 @@ pub fn draw_piece_inspector_body(
     // 1) Core Controls (clean 6-8 controls, never an overwhelming wall)
     section_card(ui, pal, Some("Core Properties"), |ui| {
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Name").size(12.8));
+            ui.label(RichText::new("Name").size(12.4));
+            let w = (ui.available_width() - 4.0).max(72.0);
             if ui
-                .add(egui::TextEdit::singleline(name).desired_width(ui.available_width()))
+                .add(egui::TextEdit::singleline(name).desired_width(w))
                 .changed()
             {
                 res.live_changed = true;
@@ -64,17 +70,61 @@ pub fn draw_piece_inspector_body(
         });
 
         ui.horizontal(|ui| {
-            ui.label(RichText::new("Style").size(12.8));
+            ui.label(RichText::new("Style").size(12.4));
+            let (tr, _) = ui.allocate_exact_size(Vec2::splat(20.0), Sense::hover());
+            draw_style_thumbnail(ui.painter(), tr, params.style, true, pal);
+            let combo_w = (ui.available_width() - 4.0).max(96.0);
             egui::ComboBox::from_id_salt("insp_style_combo")
                 .selected_text(params.style.name())
-                .width(ui.available_width())
+                .width(combo_w)
                 .show_ui(ui, |ui| {
-                    for s in WindowStyle::ALL {
-                        if ui.selectable_label(params.style == s, s.name()).clicked() {
+                    ui.label(
+                        RichText::new("Windows")
+                            .small()
+                            .strong()
+                            .color(pal.text_muted),
+                    );
+                    for &s in &WindowStyle::ALL_WINDOWS {
+                        let clicked = ui
+                            .horizontal(|ui| {
+                                let (ir, _) =
+                                    ui.allocate_exact_size(Vec2::splat(22.0), Sense::hover());
+                                draw_style_thumbnail(ui.painter(), ir, s, params.style == s, pal);
+                                ui.selectable_label(params.style == s, s.name())
+                            })
+                            .inner
+                            .clicked();
+                        if clicked {
                             params.style = s;
                             s.apply_style_defaults(params);
                             res.live_changed = true;
                             res.immediate_commit_label = Some("Change piece style");
+                            ui.close();
+                        }
+                    }
+                    ui.separator();
+                    ui.label(
+                        RichText::new("Doors")
+                            .small()
+                            .strong()
+                            .color(pal.text_muted),
+                    );
+                    for &s in &WindowStyle::ALL_DOORS {
+                        let clicked = ui
+                            .horizontal(|ui| {
+                                let (ir, _) =
+                                    ui.allocate_exact_size(Vec2::splat(22.0), Sense::hover());
+                                draw_style_thumbnail(ui.painter(), ir, s, params.style == s, pal);
+                                ui.selectable_label(params.style == s, s.name())
+                            })
+                            .inner
+                            .clicked();
+                        if clicked {
+                            params.style = s;
+                            s.apply_style_defaults(params);
+                            res.live_changed = true;
+                            res.immediate_commit_label = Some("Change piece style");
+                            ui.close();
                         }
                     }
                 });
@@ -112,12 +162,13 @@ pub fn draw_piece_inspector_body(
             res.drag_commit_label = Some("Resize height");
         }
 
-        if slider_unit_mm(
+        if slider_unit_mm_extended(
             ui,
             pal,
             "Wall Thickness",
             &mut params.wall_thickness,
             3.0..=24.0,
+            3.0..=35.0,
             unit,
         ) {
             res.live_changed = true;
@@ -495,12 +546,13 @@ pub fn draw_piece_inspector_body(
                     }
                 }
             });
-            if slider_unit_mm(
+            if slider_unit_mm_extended(
                 ui,
                 pal,
                 "Acetate Thick",
                 &mut params.acetate_thickness,
-                0.2..=1.2,
+                0.1..=5.0,
+                0.1..=20.0,
                 unit,
             ) {
                 res.live_changed = true;
@@ -569,6 +621,46 @@ pub fn draw_piece_inspector_body(
         });
 }
 
+fn draw_inspector_header(ui: &mut egui::Ui, pal: &StudioPalette, title: &str) -> bool {
+    let mut hide = false;
+    ui.horizontal(|ui| {
+        ui.label(
+            RichText::new(title)
+                .strong()
+                .size(13.5)
+                .color(pal.text_primary),
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            let (rect, resp) = ui.allocate_exact_size(Vec2::splat(22.0), Sense::click());
+            ui.painter().rect_filled(
+                rect,
+                4.0,
+                if resp.hovered() {
+                    pal.surface_elevated
+                } else {
+                    pal.surface_card
+                },
+            );
+            ui.painter()
+                .rect_stroke(rect, 4.0, Stroke::new(1.0, pal.border), StrokeKind::Inside);
+            paint_icon(
+                ui.painter(),
+                Rect::from_center_size(rect.center(), Vec2::splat(13.5)),
+                VectorIcon::ChevronRight,
+                pal.text_primary,
+            );
+            if resp
+                .on_hover_text("Hide Properties Inspector pane")
+                .clicked()
+            {
+                hide = true;
+            }
+        });
+    });
+    ui.add_space(4.0);
+    hide
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn draw_wall_inspector(
     ui: &mut egui::Ui,
@@ -584,8 +676,14 @@ pub fn draw_wall_inspector(
 ) -> InspectorResult {
     let mut res = InspectorResult::default();
 
+    if draw_inspector_header(ui, pal, "Inspector") {
+        res.action = Some(InspectorAction::HideInspector);
+        return res;
+    }
+
     egui::ScrollArea::vertical()
         .id_salt("inspector_scroll")
+        .auto_shrink([false, false])
         .show(ui, |ui| {
             // Case 1: Editing a shared ComponentDef selected directly in Explorer
             if let Some(cid) = active_component_id {
@@ -827,12 +925,13 @@ pub fn draw_wall_inspector(
                     res.live_changed = true;
                     res.drag_commit_label = Some("Resize wall height");
                 }
-                if slider_unit_mm(
+                if slider_unit_mm_extended(
                     ui,
                     pal,
                     "Wall Thickness",
                     &mut wall.wall_thickness,
                     3.0..=24.0,
+                    3.0..=35.0,
                     unit,
                 ) {
                     if wall.sync_common_settings {
@@ -841,12 +940,13 @@ pub fn draw_wall_inspector(
                     res.live_changed = true;
                     res.drag_commit_label = Some("Change wall thickness");
                 }
-                if slider_unit_mm(
+                if slider_unit_mm_extended(
                     ui,
                     pal,
                     "Acetate Thick",
                     &mut wall.acetate_thickness,
-                    0.2..=1.2,
+                    0.1..=5.0,
+                    0.1..=20.0,
                     unit,
                 ) {
                     if wall.sync_common_settings {
@@ -940,8 +1040,13 @@ pub fn draw_standalone_piece_inspector(
     door_color: &mut FilamentColor,
 ) -> InspectorResult {
     let mut res = InspectorResult::default();
+    if draw_inspector_header(ui, pal, "Inspector") {
+        res.action = Some(InspectorAction::HideInspector);
+        return res;
+    }
     egui::ScrollArea::vertical()
         .id_salt("standalone_insp_scroll")
+        .auto_shrink([false, false])
         .show(ui, |ui| {
             draw_piece_inspector_body(
                 ui,
@@ -975,7 +1080,7 @@ fn draw_instance_overrides_card(
             res.immediate_commit_label = Some("Toggle wall thickness override");
         }
         if let Some(ref mut wt) = overrides.wall_thickness
-            && slider_unit_mm(ui, pal, "Instance Wall", wt, 3.0..=24.0, unit)
+            && slider_unit_mm_extended(ui, pal, "Instance Wall", wt, 3.0..=24.0, 3.0..=35.0, unit)
         {
             res.live_changed = true;
             res.drag_commit_label = Some("Edit instance wall thickness");

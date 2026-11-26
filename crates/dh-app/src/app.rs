@@ -1,8 +1,10 @@
 use crate::canvas2d::{
-    Blueprint2DState, BlueprintAction, PhotoCanvasTool, draw_blueprint_2d,
+    Blueprint2DState, BlueprintAction, CanvasDragPayload, PhotoCanvasTool, draw_blueprint_2d,
     quick_bar::QuickBarAction,
 };
-use crate::explorer::{ExplorerAction, draw_project_explorer};
+use crate::explorer::{BrowserState, ExplorerAction, draw_floating_browser};
+use crate::gallery::{GalleryAction, GalleryState, draw_visual_gallery};
+use crate::icons::{VectorIcon, draw_style_thumbnail, paint_icon};
 use crate::inspector::{
     InspectorAction, InspectorResult, InspectorState, draw_standalone_piece_inspector,
     draw_wall_inspector,
@@ -18,7 +20,7 @@ use crate::wizards::{
 };
 use dh_core::{
     ComponentDef, DisplayUnit, OpeningSource, PieceTemplate, Project, ProjectKind, StandalonePiece,
-    TemplateScope, UndoHistory, WallOpening, WindowParams, sanitize_filename,
+    TemplateScope, UndoHistory, WallOpening, WindowParams, WindowStyle, sanitize_filename,
 };
 use dh_export::{
     BedSizePreset, PdfExportOptions, export_piece_pdf, export_project_booklet_pdf, export_wall_pdf,
@@ -72,6 +74,10 @@ pub struct DollhouseStudioApp {
 
     pub welcome_state: WelcomeState,
     pub ribbon_state: RibbonState,
+    pub gallery_state: GalleryState,
+    pub browser_state: BrowserState,
+    pub show_left_gallery: bool,
+    pub show_right_inspector: bool,
     pub canvas2d: Blueprint2DState,
     pub inspector_state: InspectorState,
 
@@ -137,6 +143,10 @@ impl DollhouseStudioApp {
             active_component_id: None,
             welcome_state: WelcomeState::default(),
             ribbon_state: RibbonState::default(),
+            gallery_state: GalleryState::default(),
+            browser_state: BrowserState::default(),
+            show_left_gallery: true,
+            show_right_inspector: true,
             canvas2d: Blueprint2DState::new(),
             inspector_state: InspectorState::default(),
             new_project_wizard: NewProjectWizardState::closed(unit, last_root),
@@ -340,6 +350,79 @@ impl DollhouseStudioApp {
         wall.openings
             .first()
             .map(|op| (op.id.clone(), op.resolve_params(&self.project.components)))
+    }
+
+    fn selected_params_snapshot(&self) -> Option<WindowParams> {
+        if self.project.manifest.kind == ProjectKind::SinglePiece {
+            return self.project.active_piece().map(|p| p.params.clone());
+        }
+        if let Some(ref cid) = self.active_component_id
+            && let Some(c) = self.project.component(cid)
+        {
+            return Some(c.params.clone());
+        }
+        let oid = self.selected_opening_ids.first()?;
+        let wall = self.project.active_wall()?;
+        wall.openings
+            .iter()
+            .find(|o| &o.id == oid)
+            .map(|o| o.resolve_params(&self.project.components))
+    }
+
+    fn mutate_selected_params<F>(&mut self, undo_label: &'static str, mut f: F) -> bool
+    where
+        F: FnMut(&mut WindowParams),
+    {
+        let mut changed = false;
+        if self.project.manifest.kind == ProjectKind::SinglePiece {
+            if let Some(piece) = self.project.active_piece_mut() {
+                f(&mut piece.params);
+                changed = true;
+            }
+        } else if let Some(ref cid) = self.active_component_id {
+            if let Some(comp) = self.project.component_mut(cid) {
+                f(&mut comp.params);
+                changed = true;
+            }
+        } else if !self.selected_opening_ids.is_empty() {
+            let sel: HashSet<String> = self.selected_opening_ids.iter().cloned().collect();
+            let mut linked_cids: HashSet<String> = HashSet::new();
+            if let Some(w) = self.project.active_wall_mut() {
+                for op in &mut w.openings {
+                    if sel.contains(&op.id) {
+                        match &mut op.source {
+                            OpeningSource::Unique { params } => {
+                                f(params);
+                                changed = true;
+                            }
+                            OpeningSource::Component { component_id, .. } => {
+                                linked_cids.insert(component_id.clone());
+                            }
+                        }
+                    }
+                }
+            }
+            for cid in linked_cids {
+                if let Some(c) = self.project.component_mut(&cid) {
+                    f(&mut c.params);
+                    changed = true;
+                }
+            }
+            let comps = self.project.components.clone();
+            if let Some(w) = self.project.active_wall_mut() {
+                let ww = w.width;
+                let wh = w.height;
+                for op in &mut w.openings {
+                    if sel.contains(&op.id) {
+                        op.clamp_to_wall(ww, wh, &comps);
+                    }
+                }
+            }
+        }
+        if changed {
+            self.commit_undo(undo_label);
+        }
+        changed
     }
 
     fn sync_3d_viewport(&mut self, ctx: &egui::Context) {
@@ -899,6 +982,7 @@ impl DollhouseStudioApp {
         self.sync_3d_viewport(&ctx);
 
         // 1) Top Ribbon
+        let sel_params_snap = self.selected_params_snapshot();
         let ribbon_actions = egui::Panel::top("studio_top_ribbon")
             .resizable(false)
             .show(ui, |ui| {
@@ -923,6 +1007,10 @@ impl DollhouseStudioApp {
                     self.canvas2d.show_grid,
                     self.canvas2d.show_rulers,
                     self.canvas2d.show_architrave_outlines,
+                    sel_params_snap.as_ref(),
+                    self.show_left_gallery,
+                    self.show_right_inspector,
+                    self.browser_state.open,
                     &view_settings,
                     wall_solid,
                     &mut self.ribbon_state,
@@ -931,89 +1019,103 @@ impl DollhouseStudioApp {
             .inner;
         self.handle_ribbon_actions(ribbon_actions);
 
-        // 2) Left CAD Explorer
-        let explorer_resp = egui::Panel::left("studio_explorer")
-            .resizable(false)
-            .exact_size(256.0)
-            .show(ui, |ui| {
-                draw_project_explorer(
-                    ui,
-                    &pal,
-                    &self.project,
-                    self.active_component_id.as_deref(),
-                    &self.selected_opening_ids,
-                    &self.personal_templates,
-                    &self.starter_templates,
-                    self.project.manifest.display_unit,
-                )
-            });
-        self.last_explorer_width = explorer_resp.response.rect.width();
-        self.handle_explorer_actions(explorer_resp.inner);
+        // 2) Left Resizable / Hideable Visual Library Gallery
+        if self.show_left_gallery {
+            let has_sel = sel_params_snap.is_some();
+            let gallery_resp = egui::Panel::left("studio_gallery")
+                .resizable(true)
+                .default_size(276.0)
+                .min_size(196.0)
+                .max_size(480.0)
+                .show(ui, |ui| {
+                    draw_visual_gallery(
+                        ui,
+                        &pal,
+                        &self.project,
+                        self.active_component_id.as_deref(),
+                        has_sel,
+                        &self.personal_templates,
+                        &self.starter_templates,
+                        self.project.manifest.display_unit,
+                        &mut self.gallery_state,
+                    )
+                });
+            self.last_explorer_width = gallery_resp.response.rect.width();
+            self.handle_gallery_actions(gallery_resp.inner);
+        } else {
+            self.last_explorer_width = 0.0;
+        }
 
-        // 3) Right Contextual Inspector
-        let insp_resp = egui::Panel::right("studio_inspector")
-            .resizable(false)
-            .exact_size(326.0)
-            .show(ui, |ui| {
-                let unit = self.project.manifest.display_unit;
-                let (mut ext_col, mut door_col) = {
-                    let st = self.viewport3d.lock().unwrap();
-                    (st.settings.filament_color, st.settings.door_color)
-                };
+        // 3) Right Resizable / Hideable Contextual Inspector
+        if self.show_right_inspector {
+            let insp_resp = egui::Panel::right("studio_inspector")
+                .resizable(true)
+                .default_size(320.0)
+                .min_size(250.0)
+                .max_size(480.0)
+                .show(ui, |ui| {
+                    let unit = self.project.manifest.display_unit;
+                    let (mut ext_col, mut door_col) = {
+                        let st = self.viewport3d.lock().unwrap();
+                        (st.settings.filament_color, st.settings.door_color)
+                    };
 
-                let res = match self.project.manifest.kind {
-                    ProjectKind::SinglePiece => {
-                        if let Some(piece) = self.project.active_piece_mut() {
-                            draw_standalone_piece_inspector(
-                                ui,
-                                &pal,
-                                piece,
-                                unit,
-                                &mut ext_col,
-                                &mut door_col,
-                            )
-                        } else {
-                            InspectorResult::default()
+                    let res = match self.project.manifest.kind {
+                        ProjectKind::SinglePiece => {
+                            if let Some(piece) = self.project.active_piece_mut() {
+                                draw_standalone_piece_inspector(
+                                    ui,
+                                    &pal,
+                                    piece,
+                                    unit,
+                                    &mut ext_col,
+                                    &mut door_col,
+                                )
+                            } else {
+                                InspectorResult::default()
+                            }
                         }
-                    }
-                    ProjectKind::MultiWall => {
-                        let Some(wid) = self.project.manifest.active_wall_id.clone() else {
-                            return InspectorResult::default();
-                        };
-                        let w_idx = self.project.walls.iter().position(|w| w.id == wid);
-                        if let Some(idx) = w_idx {
-                            let wall = &mut self.project.walls[idx];
-                            let comps = &mut self.project.components;
-                            draw_wall_inspector(
-                                ui,
-                                &pal,
-                                wall,
-                                comps,
-                                &self.selected_opening_ids,
-                                self.active_component_id.as_deref(),
-                                unit,
-                                &mut ext_col,
-                                &mut door_col,
-                                &mut self.inspector_state,
-                            )
-                        } else {
-                            InspectorResult::default()
+                        ProjectKind::MultiWall => {
+                            let Some(wid) = self.project.manifest.active_wall_id.clone() else {
+                                return InspectorResult::default();
+                            };
+                            let w_idx = self.project.walls.iter().position(|w| w.id == wid);
+                            if let Some(idx) = w_idx {
+                                let wall = &mut self.project.walls[idx];
+                                let comps = &mut self.project.components;
+                                draw_wall_inspector(
+                                    ui,
+                                    &pal,
+                                    wall,
+                                    comps,
+                                    &self.selected_opening_ids,
+                                    self.active_component_id.as_deref(),
+                                    unit,
+                                    &mut ext_col,
+                                    &mut door_col,
+                                    &mut self.inspector_state,
+                                )
+                            } else {
+                                InspectorResult::default()
+                            }
                         }
-                    }
-                };
+                    };
 
-                {
-                    let mut st = self.viewport3d.lock().unwrap();
-                    st.settings.filament_color = ext_col;
-                    st.settings.door_color = door_col;
-                }
-                res
-            });
-        self.last_inspector_width = insp_resp.response.rect.width();
-        self.handle_inspector_result(insp_resp.inner);
+                    {
+                        let mut st = self.viewport3d.lock().unwrap();
+                        st.settings.filament_color = ext_col;
+                        st.settings.door_color = door_col;
+                    }
+                    res
+                });
+            self.last_inspector_width = insp_resp.response.rect.width();
+            self.handle_inspector_result(insp_resp.inner);
+        } else {
+            self.last_inspector_width = 0.0;
+        }
 
         // 4) Central Canvas (Blueprint 2D / Wall 3D / Piece 3D)
-        egui::CentralPanel::default().show(ui, |ui| {
+        let central_resp = egui::CentralPanel::default().show(ui, |ui| {
             let effective_vp = if self.project.manifest.kind == ProjectKind::SinglePiece {
                 ActiveViewport::Piece3D
             } else {
@@ -1046,8 +1148,133 @@ impl DollhouseStudioApp {
                 }
             }
         });
+        let central_rect = central_resp.response.rect;
 
         self.flush_pending_undo(&ctx);
+
+        let modal_open = self.show_hub_overlay
+            || self.onboarding.open
+            || self.photo_wizard.open
+            || self.new_project_wizard.open;
+
+        // Floating Fusion-360-style Scene Browser Tree over viewport
+        if !modal_open && self.browser_state.open {
+            let eff_bp = self.project.manifest.kind == ProjectKind::MultiWall
+                && self.viewport == ActiveViewport::Blueprint2D;
+            let browser_actions = draw_floating_browser(
+                &ctx,
+                &pal,
+                central_rect,
+                eff_bp && self.canvas2d.show_rulers,
+                eff_bp && self.canvas2d.edit_photo_mode,
+                &self.project,
+                self.active_component_id.as_deref(),
+                &self.selected_opening_ids,
+                self.project.manifest.display_unit,
+                &mut self.browser_state,
+            );
+            self.handle_explorer_actions(browser_actions);
+        }
+
+        // Edge reopen handles when side panes are hidden
+        if !modal_open && !self.show_left_gallery && central_rect.width() > 140.0 {
+            egui::Area::new(egui::Id::unique("reopen_left_gallery_btn"))
+                .fixed_pos(egui::pos2(
+                    central_rect.left() + 8.0,
+                    central_rect.center().y - 16.0,
+                ))
+                .order(egui::Order::Foreground)
+                .show(&ctx, |ui| {
+                    let (r, resp) =
+                        ui.allocate_exact_size(Vec2::new(26.0, 34.0), egui::Sense::click());
+                    ui.painter().rect_filled(r, 6.0, pal.hud_glass);
+                    ui.painter().rect_stroke(
+                        r,
+                        6.0,
+                        Stroke::new(1.0, pal.border_strong),
+                        egui::StrokeKind::Inside,
+                    );
+                    paint_icon(
+                        ui.painter(),
+                        egui::Rect::from_center_size(r.center(), Vec2::splat(15.0)),
+                        VectorIcon::ChevronRight,
+                        pal.text_primary,
+                    );
+                    if resp.on_hover_text("Show Visual Library pane").clicked() {
+                        self.show_left_gallery = true;
+                    }
+                });
+        }
+        if !modal_open && !self.show_right_inspector && central_rect.width() > 140.0 {
+            egui::Area::new(egui::Id::unique("reopen_right_inspector_btn"))
+                .fixed_pos(egui::pos2(
+                    central_rect.right() - 34.0,
+                    central_rect.center().y - 16.0,
+                ))
+                .order(egui::Order::Foreground)
+                .show(&ctx, |ui| {
+                    let (r, resp) =
+                        ui.allocate_exact_size(Vec2::new(26.0, 34.0), egui::Sense::click());
+                    ui.painter().rect_filled(r, 6.0, pal.hud_glass);
+                    ui.painter().rect_stroke(
+                        r,
+                        6.0,
+                        Stroke::new(1.0, pal.border_strong),
+                        egui::StrokeKind::Inside,
+                    );
+                    paint_icon(
+                        ui.painter(),
+                        egui::Rect::from_center_size(r.center(), Vec2::splat(15.0)),
+                        VectorIcon::ChevronLeft,
+                        pal.text_primary,
+                    );
+                    if resp
+                        .on_hover_text("Show Properties Inspector pane")
+                        .clicked()
+                    {
+                        self.show_right_inspector = true;
+                    }
+                });
+        }
+
+        // Drag ghost card when dragging from Visual Gallery or Browser onto canvas
+        if let Some(payload) = egui::DragAndDrop::payload::<CanvasDragPayload>(&ctx) {
+            if let Some(ptr) = ctx.input(|i| i.pointer.hover_pos()) {
+                let (style, label) = match &*payload {
+                    CanvasDragPayload::Style(s) => (*s, s.name().to_string()),
+                    CanvasDragPayload::Component(cid) => self
+                        .project
+                        .component(cid)
+                        .map(|c| (c.params.style, c.name.clone()))
+                        .unwrap_or((WindowStyle::GeorgianGrid, "Component".into())),
+                    CanvasDragPayload::Template(t) => (t.params.style, t.name.clone()),
+                };
+                egui::Area::new(egui::Id::unique("gallery_drag_ghost"))
+                    .fixed_pos(ptr + Vec2::new(14.0, 14.0))
+                    .order(egui::Order::Tooltip)
+                    .interactable(false)
+                    .show(&ctx, |ui| {
+                        egui::Frame::NONE
+                            .fill(pal.hud_glass)
+                            .stroke(Stroke::new(1.2, pal.accent))
+                            .corner_radius(CornerRadius::same(7))
+                            .inner_margin(Margin::same(6))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    let (tr, _) = ui.allocate_exact_size(
+                                        Vec2::splat(34.0),
+                                        egui::Sense::hover(),
+                                    );
+                                    draw_style_thumbnail(ui.painter(), tr, style, true, &pal);
+                                    ui.label(RichText::new(label).small().strong());
+                                });
+                            });
+                    });
+            }
+            if !ctx.input(|i| i.pointer.any_down()) {
+                egui::DragAndDrop::clear_payload(&ctx);
+            }
+        }
 
         // Floating Project & Template Hub overlay (non-destructive over live studio workspace).
         if self.show_hub_overlay
@@ -1403,16 +1630,46 @@ impl DollhouseStudioApp {
                     self.insert_params_onto_active_wall(style.name(), p, None);
                 }
                 RibbonAction::SelectOrApplyStyle(style) => {
-                    if self.project.manifest.kind == ProjectKind::SinglePiece {
-                        if let Some(piece) = self.project.active_piece_mut() {
-                            piece.params.style = style;
-                            style.apply_style_defaults(&mut piece.params);
-                            self.commit_undo("Change style");
-                        }
-                    } else {
+                    if !self.mutate_selected_params("Apply style to selection", |p| {
+                        apply_window_style_to_params(p, style);
+                    }) {
                         let mut p = WindowParams::default();
                         style.apply_style_defaults(&mut p);
                         self.insert_params_onto_active_wall(style.name(), p, None);
+                    }
+                }
+                RibbonAction::ApplyArchitraveToSelection(ap) => {
+                    self.mutate_selected_params("Apply trim profile", |p| {
+                        p.architrave_style = ap;
+                    });
+                }
+                RibbonAction::ApplyShutterToSelection(sh) => {
+                    self.mutate_selected_params("Apply shutter style", |p| {
+                        p.shutter_style = sh;
+                    });
+                }
+                RibbonAction::ApplyHeaderToSelection(hs) => {
+                    self.mutate_selected_params("Apply header style", |p| {
+                        p.header_style = hs;
+                    });
+                }
+                RibbonAction::ToggleSillOnSelection => {
+                    self.mutate_selected_params("Toggle exterior sill", |p| {
+                        if p.style.supports_sill() {
+                            p.sill_enabled = !p.sill_enabled;
+                        }
+                    });
+                }
+                RibbonAction::ToggleLeftGallery(v) => {
+                    self.show_left_gallery = v;
+                }
+                RibbonAction::ToggleRightInspector(v) => {
+                    self.show_right_inspector = v;
+                }
+                RibbonAction::ToggleFloatingBrowser(v) => {
+                    self.browser_state.open = v;
+                    if v {
+                        self.browser_state.collapsed = false;
                     }
                 }
                 RibbonAction::NewBlankWall => {
@@ -1741,9 +1998,75 @@ impl DollhouseStudioApp {
         }
     }
 
+    fn handle_gallery_actions(&mut self, actions: Vec<GalleryAction>) {
+        for act in actions {
+            match act {
+                GalleryAction::HideGallery => {
+                    self.show_left_gallery = false;
+                }
+                GalleryAction::InsertStyle(style) => {
+                    if self.project.manifest.kind == ProjectKind::SinglePiece {
+                        self.mutate_selected_params("Apply style", |p| {
+                            apply_window_style_to_params(p, style);
+                        });
+                    } else {
+                        let mut p = WindowParams::default();
+                        style.apply_style_defaults(&mut p);
+                        self.insert_params_onto_active_wall(style.name(), p, None);
+                    }
+                }
+                GalleryAction::ApplyStyleToSelected(style) => {
+                    self.mutate_selected_params("Apply style to selected", |p| {
+                        apply_window_style_to_params(p, style);
+                    });
+                }
+                GalleryAction::SelectComponent(cid) => {
+                    self.active_component_id = Some(cid);
+                }
+                GalleryAction::PlaceComponentOnActiveWall(cid) => {
+                    if let Some(wid) = self.project.manifest.active_wall_id.clone()
+                        && let Some(oid) = self
+                            .project
+                            .place_component_instance(&wid, &cid, None, 32.0, 56.0)
+                    {
+                        self.active_component_id = None;
+                        self.selected_opening_ids = vec![oid];
+                        self.commit_undo("Place component instance");
+                    }
+                }
+                GalleryAction::DeleteComponent(cid) => {
+                    self.project.delete_component(&cid);
+                    if self.active_component_id.as_deref() == Some(cid.as_str()) {
+                        self.active_component_id = None;
+                    }
+                    self.commit_undo("Delete component");
+                }
+                GalleryAction::InsertTemplate(tpl) => {
+                    if self.project.manifest.kind == ProjectKind::SinglePiece {
+                        if let Some(p) = self.project.active_piece_mut() {
+                            p.params = tpl.params;
+                            self.commit_undo("Apply template");
+                        }
+                    } else {
+                        self.insert_params_onto_active_wall(&tpl.name, tpl.params, None);
+                    }
+                }
+                GalleryAction::ApplyTemplateStyleOnly(tpl) => {
+                    self.mutate_selected_params("Apply template style", |p| {
+                        p.apply_style_only_from(&tpl.params);
+                    });
+                }
+                GalleryAction::SaveSelectionAsTemplate => self.open_save_template_for_selection(),
+            }
+        }
+    }
+
     fn handle_explorer_actions(&mut self, actions: Vec<ExplorerAction>) {
         for act in actions {
             match act {
+                ExplorerAction::HideBrowser => {
+                    self.browser_state.open = false;
+                }
                 ExplorerAction::SelectWall(wid) => {
                     self.project.manifest.active_wall_id = Some(wid);
                     self.selected_opening_ids.clear();
@@ -1899,50 +2222,6 @@ impl DollhouseStudioApp {
                     }
                     self.commit_undo("Delete component");
                 }
-                ExplorerAction::InsertTemplateOnActiveWall(tpl) => {
-                    if self.project.manifest.kind == ProjectKind::SinglePiece {
-                        if let Some(p) = self.project.active_piece_mut() {
-                            p.params = tpl.params;
-                            self.commit_undo("Apply template");
-                        }
-                    } else {
-                        self.insert_params_onto_active_wall(&tpl.name, tpl.params, None);
-                    }
-                }
-                ExplorerAction::ApplyTemplateStyleOnly(tpl) => {
-                    if self.project.manifest.kind == ProjectKind::SinglePiece {
-                        if let Some(p) = self.project.active_piece_mut() {
-                            p.params.apply_style_only_from(&tpl.params);
-                            self.commit_undo("Apply template style");
-                        }
-                    } else if let Some(ref cid) = self.active_component_id {
-                        if let Some(comp) = self.project.component_mut(cid) {
-                            comp.params.apply_style_only_from(&tpl.params);
-                            self.commit_undo("Apply template style to component");
-                        }
-                    } else if let Some(oid) = self.selected_opening_ids.first().cloned() {
-                        let mut linked_cid: Option<String> = None;
-                        if let Some(w) = self.project.active_wall_mut()
-                            && let Some(op) = w.openings.iter_mut().find(|o| o.id == oid)
-                        {
-                            match &mut op.source {
-                                OpeningSource::Unique { params } => {
-                                    params.apply_style_only_from(&tpl.params);
-                                }
-                                OpeningSource::Component { component_id, .. } => {
-                                    linked_cid = Some(component_id.clone());
-                                }
-                            }
-                        }
-                        if let Some(cid) = linked_cid
-                            && let Some(c) = self.project.component_mut(&cid)
-                        {
-                            c.params.apply_style_only_from(&tpl.params);
-                        }
-                        self.commit_undo("Apply template style");
-                    }
-                }
-                ExplorerAction::SaveSelectionAsTemplate => self.open_save_template_for_selection(),
             }
         }
     }
@@ -1957,6 +2236,9 @@ impl DollhouseStudioApp {
 
         if let Some(act) = res.action {
             match act {
+                InspectorAction::HideInspector => {
+                    self.show_right_inspector = false;
+                }
                 InspectorAction::PromoteOpeningToComponent(oid) => {
                     if let Some(wid) = self.project.manifest.active_wall_id.clone()
                         && self
@@ -2232,6 +2514,22 @@ impl eframe::App for DollhouseStudioApp {
             && let Ok(mut st) = self.viewport3d.lock()
         {
             st.destroy_gl(gl_ctx);
+        }
+    }
+}
+
+fn apply_window_style_to_params(params: &mut WindowParams, style: WindowStyle) {
+    let same_kind = params.style.is_door() == style.is_door();
+    let prev_w = params.opening_width;
+    let prev_h = params.opening_height;
+    params.style = style;
+    style.apply_style_defaults(params);
+    if same_kind {
+        params.opening_width = prev_w;
+        if style == WindowStyle::CircularBullsEye {
+            params.opening_height = prev_w;
+        } else {
+            params.opening_height = prev_h;
         }
     }
 }

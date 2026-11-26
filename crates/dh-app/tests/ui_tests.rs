@@ -1,4 +1,5 @@
 use dh_app::app::DollhouseStudioApp;
+use dh_app::gallery::GalleryViewMode;
 use dh_app::wizards::PhotoCalibrationLine;
 use dh_app::wizards::photo_wizard::compute_calibrated_size_mm;
 use dh_core::{DisplayUnit, Project, ScalePreset, WallPhotoConfig, WindowParams, WindowStyle};
@@ -63,20 +64,25 @@ fn multi_wall_and_single_piece_side_panels_remain_stable_over_20_frames() {
     let mut insp_widths = Vec::new();
     for i in 0..20 {
         app.canvas2d.show_architrave_outlines = i < 14;
+        app.gallery_state.view_mode = if i < 10 {
+            GalleryViewMode::Grid
+        } else {
+            GalleryViewMode::List
+        };
         run_frame(&ctx, &mut app);
         exp_widths.push(app.last_explorer_width);
         insp_widths.push(app.last_inspector_width);
     }
     let exp_first = exp_widths[0];
     let insp_first = insp_widths[0];
-    assert!(exp_first > 200.0 && insp_first > 250.0);
+    assert!(exp_first >= 196.0 && insp_first >= 250.0);
     assert!(
         exp_widths.iter().all(|w| (*w - exp_first).abs() < 1.0),
-        "Explorer panel width drifted across frames: {exp_widths:?}"
+        "Left gallery width drifted across frames: {exp_widths:?}"
     );
     assert!(
         insp_widths.iter().all(|w| (*w - insp_first).abs() < 1.0),
-        "Inspector panel width drifted across frames: {insp_widths:?}"
+        "Right inspector width drifted across frames: {insp_widths:?}"
     );
 
     let single = Project::new_single_piece(
@@ -189,4 +195,39 @@ fn photo_wizard_multi_line_and_independent_hv_calibration_accuracy() {
     assert!((w * 0.4 - 83.25).abs() < 0.05);
     assert!((residuals[0].1 - 176.4).abs() < 0.05);
     assert!((residuals[1].1 - 83.25).abs() < 0.05);
+}
+
+#[test]
+fn side_panes_hide_show_browser_collapse_and_thick_acetate() {
+    let ctx = egui::Context::default();
+    let proj = Project::new_multi_wall(
+        "Workspace Pane Test",
+        true,
+        ScalePreset::Scale1_12,
+        DisplayUnit::Mm,
+    );
+    let mut app = DollhouseStudioApp::new_headless_with_project(proj, None);
+
+    app.show_left_gallery = false;
+    app.show_right_inspector = false;
+    app.browser_state.collapsed = true;
+    run_frame(&ctx, &mut app);
+    assert_eq!(app.last_explorer_width, 0.0);
+    assert_eq!(app.last_inspector_width, 0.0);
+
+    app.show_left_gallery = true;
+    app.show_right_inspector = true;
+    app.browser_state.collapsed = false;
+    run_frame(&ctx, &mut app);
+    assert!(app.last_explorer_width >= 196.0);
+    assert!(app.last_inspector_width >= 250.0);
+
+    // Typed glazing / acrylic thicker than 5mm is preserved up to 20mm
+    let thick = WindowParams {
+        acetate_thickness: 8.0,
+        wall_thickness: 14.0,
+        ..Default::default()
+    }
+    .sanitized();
+    assert!((thick.acetate_thickness - 8.0).abs() < 1e-6);
 }

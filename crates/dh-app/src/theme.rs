@@ -286,6 +286,19 @@ pub fn segmented_pill<T: PartialEq + Copy>(
     changed
 }
 
+fn bounded_row_label(ui: &mut egui::Ui, pal: &StudioPalette, label: &str, max_w: f32) {
+    ui.allocate_ui_with_layout(
+        Vec2::new(max_w.max(44.0), 20.0),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.add(
+                egui::Label::new(RichText::new(label).size(12.4).color(pal.text_primary))
+                    .truncate(),
+            );
+        },
+    );
+}
+
 /// Scrubbable numeric input displayed in `DisplayUnit` while storing exact millimeters in `val_mm`.
 pub fn slider_unit_mm(
     ui: &mut egui::Ui,
@@ -295,20 +308,39 @@ pub fn slider_unit_mm(
     range_mm: std::ops::RangeInclusive<f64>,
     unit: DisplayUnit,
 ) -> bool {
+    slider_unit_mm_extended(ui, pal, label, val_mm, range_mm.clone(), range_mm, unit)
+}
+
+/// Scrubbable numeric input where the visual slider spans `slider_range_mm`, while typing or dragging
+/// the numeric field accepts the wider `typed_range_mm` without clamping to the slider max.
+pub fn slider_unit_mm_extended(
+    ui: &mut egui::Ui,
+    pal: &StudioPalette,
+    label: &str,
+    val_mm: &mut f64,
+    slider_range_mm: std::ops::RangeInclusive<f64>,
+    typed_range_mm: std::ops::RangeInclusive<f64>,
+    unit: DisplayUnit,
+) -> bool {
     let mut disp = unit.from_mm(*val_mm);
-    let r_disp = unit.from_mm(*range_mm.start())..=unit.from_mm(*range_mm.end());
+    let slider_r_disp =
+        unit.from_mm(*slider_range_mm.start())..=unit.from_mm(*slider_range_mm.end());
+    let typed_r_disp = unit.from_mm(*typed_range_mm.start())..=unit.from_mm(*typed_range_mm.end());
     let mut changed = false;
     let avail = ui.available_width();
-    let slider_w = (avail - 195.0).clamp(54.0, 118.0);
+    let dv_w = 66.0;
+    let slider_w = (avail - 170.0).clamp(32.0, 128.0);
+    let label_w = (avail - slider_w - dv_w - 16.0).max(48.0);
 
     ui.horizontal(|ui| {
-        ui.label(RichText::new(label).size(12.8).color(pal.text_primary));
+        ui.spacing_mut().item_spacing.x = 5.0;
+        bounded_row_label(ui, pal, label, label_w);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
                 .add_sized(
-                    [72.0, 22.0],
+                    [dv_w, 22.0],
                     egui::DragValue::new(&mut disp)
-                        .range(r_disp.clone())
+                        .range(typed_r_disp)
                         .speed(unit.drag_speed())
                         .suffix(unit.suffix())
                         .max_decimals(unit.decimals()),
@@ -320,7 +352,11 @@ pub fn slider_unit_mm(
             }
             ui.spacing_mut().slider_width = slider_w;
             if ui
-                .add(egui::Slider::new(&mut disp, r_disp).show_value(false))
+                .add(
+                    egui::Slider::new(&mut disp, slider_r_disp)
+                        .clamping(egui::SliderClamping::Never)
+                        .show_value(false),
+                )
                 .changed()
             {
                 *val_mm = unit.to_mm(disp);
@@ -343,12 +379,16 @@ pub fn drag_unit_mm(
     let mut disp = unit.from_mm(*val_mm);
     let r_disp = unit.from_mm(*range_mm.start())..=unit.from_mm(*range_mm.end());
     let mut changed = false;
+    let avail = ui.available_width();
+    let dv_w = 78.0;
+    let label_w = (avail - dv_w - 10.0).max(48.0);
     ui.horizontal(|ui| {
-        ui.label(RichText::new(label).size(12.8).color(pal.text_primary));
+        ui.spacing_mut().item_spacing.x = 5.0;
+        bounded_row_label(ui, pal, label, label_w);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
                 .add_sized(
-                    [82.0, 22.0],
+                    [dv_w, 22.0],
                     egui::DragValue::new(&mut disp)
                         .range(r_disp)
                         .speed(unit.drag_speed())
@@ -374,13 +414,16 @@ pub fn slider_u32(
 ) -> bool {
     let mut changed = false;
     let avail = ui.available_width();
-    let slider_w = (avail - 185.0).clamp(54.0, 118.0);
+    let dv_w = 50.0;
+    let slider_w = (avail - 160.0).clamp(32.0, 128.0);
+    let label_w = (avail - slider_w - dv_w - 16.0).max(48.0);
     ui.horizontal(|ui| {
-        ui.label(RichText::new(label).size(12.8).color(pal.text_primary));
+        ui.spacing_mut().item_spacing.x = 5.0;
+        bounded_row_label(ui, pal, label, label_w);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             changed |= ui
                 .add_sized(
-                    [54.0, 22.0],
+                    [dv_w, 22.0],
                     egui::DragValue::new(val).range(range.clone()).speed(0.1),
                 )
                 .changed();
@@ -404,13 +447,16 @@ pub fn slider_ratio_pct(
     let mut pct = *val * 100.0;
     let r_pct = (*range.start() * 100.0)..=(*range.end() * 100.0);
     let avail = ui.available_width();
-    let slider_w = (avail - 185.0).clamp(54.0, 118.0);
+    let dv_w = 58.0;
+    let slider_w = (avail - 165.0).clamp(32.0, 128.0);
+    let label_w = (avail - slider_w - dv_w - 16.0).max(48.0);
     ui.horizontal(|ui| {
-        ui.label(RichText::new(label).size(12.8).color(pal.text_primary));
+        ui.spacing_mut().item_spacing.x = 5.0;
+        bounded_row_label(ui, pal, label, label_w);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             if ui
                 .add_sized(
-                    [62.0, 22.0],
+                    [dv_w, 22.0],
                     egui::DragValue::new(&mut pct)
                         .range(r_pct.clone())
                         .speed(0.5)

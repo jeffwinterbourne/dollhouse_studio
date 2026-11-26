@@ -628,7 +628,7 @@ impl ProjectWall {
     /// (both unique openings and per-instance overrides on linked components).
     pub fn apply_common_settings_to_openings(&mut self) {
         self.wall_thickness = self.wall_thickness.clamp(3.0, 35.0);
-        self.acetate_thickness = self.acetate_thickness.clamp(0.1, 5.0);
+        self.acetate_thickness = self.acetate_thickness.clamp(0.1, 20.0);
         for op in &mut self.openings {
             match &mut op.source {
                 OpeningSource::Unique { params } => {

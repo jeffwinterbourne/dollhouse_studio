@@ -1109,7 +1109,7 @@ impl WindowParams {
         p.sill_depth = p.sill_depth.clamp(0.5, 15.0);
         p.wall_fit_clearance = p.wall_fit_clearance.clamp(0.0, 1.0);
         p.index_clearance = p.index_clearance.clamp(0.05, 0.6);
-        p.acetate_thickness = p.acetate_thickness.clamp(0.1, 5.0);
+        p.acetate_thickness = p.acetate_thickness.clamp(0.1, 20.0);
         p.acetate_clearance = p.acetate_clearance.clamp(0.05, 1.0);
 
         let min_dim = p.opening_width.min(p.opening_height);

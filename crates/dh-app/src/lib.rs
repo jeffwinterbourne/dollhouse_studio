@@ -1,6 +1,7 @@
 pub mod app;
 pub mod canvas2d;
 pub mod explorer;
+pub mod gallery;
 pub mod icons;
 pub mod inspector;
 pub mod photo_cache;

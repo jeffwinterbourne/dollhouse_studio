@@ -428,7 +428,7 @@ impl Project {
         wall.width = width.clamp(40.0, 2000.0);
         wall.height = height.clamp(40.0, 2000.0);
         wall.wall_thickness = wall_thickness.clamp(3.0, 35.0);
-        wall.acetate_thickness = acetate_thickness.clamp(0.1, 5.0);
+        wall.acetate_thickness = acetate_thickness.clamp(0.1, 20.0);
         let id = wall.id.clone();
         self.manifest.kind = ProjectKind::MultiWall;
         self.manifest.active_wall_id = Some(id.clone());

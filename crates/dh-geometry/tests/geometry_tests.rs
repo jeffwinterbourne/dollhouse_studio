@@ -126,6 +126,31 @@ fn all_architrave_chamfer_styles_and_thick_5mm_acetate_are_printable() {
 }
 
 #[test]
+fn thick_glazing_above_5mm_remains_watertight_and_overhang_free() {
+    for wall_t in [9.0, 14.0] {
+        for style in [
+            WindowStyle::GeorgianGrid,
+            WindowStyle::ArchedGeorgian,
+            WindowStyle::DoorGlazedFrench,
+        ] {
+            let mut params = WindowParams::default();
+            style.apply_style_defaults(&mut params);
+            params.wall_thickness = wall_t;
+            params.acetate_thickness = 8.0;
+
+            let win = build_window(&params);
+            assert!(
+                win.printable_ok,
+                "Thick glazing 8mm failed for {:?} (wall_t={wall_t}): ext={}, int={}",
+                style, win.ext_diag, win.int_diag
+            );
+            assert!((win.params.acetate_thickness - 8.0).abs() < 1e-6);
+            assert!(win.specs.effective_wall_thickness >= 10.2);
+        }
+    }
+}
+
+#[test]
 fn elaborate_bar_chamfers_and_v_grooves_are_watertight_and_overhang_free() {
     for groove in GrooveStyle::ALL {
         for style in WindowStyle::ALL {

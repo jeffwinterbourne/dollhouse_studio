@@ -1,9 +1,9 @@
-use crate::canvas2d::{CanvasDragPayload, PhotoCanvasTool};
+use crate::canvas2d::PhotoCanvasTool;
 use crate::icons::{VectorIcon, draw_style_thumbnail, paint_icon};
 use crate::theme::{StudioPalette, segmented_pill};
 use dh_core::{
-    DisplayUnit, FilamentColor, Project, ProjectKind, ScalePreset, UndoHistory, ViewMode,
-    WindowStyle,
+    ArchitraveStyle, DisplayUnit, FilamentColor, HeaderStyle, Project, ProjectKind, ScalePreset,
+    ShutterStyle, UndoHistory, ViewMode, WindowParams, WindowStyle,
 };
 use dh_export::BedSizePreset;
 use dh_project::ThemeMode;
@@ -116,13 +116,22 @@ pub enum RibbonAction {
     SnapDoorFloor,
     ToggleArchitraves(bool),
 
-    // Design
+    // Design (Microsoft Office selection-formatting model)
     SaveSelectionAsTemplate,
     MakeSelectedComponent,
+    ApplyArchitraveToSelection(ArchitraveStyle),
+    ApplyShutterToSelection(ShutterStyle),
+    ApplyHeaderToSelection(HeaderStyle),
+    ToggleSillOnSelection,
     ApplyScalePreset(ScalePreset),
     SetFilamentExterior(FilamentColor),
     SetFilamentDoor(FilamentColor),
     SetFilamentWall(FilamentColor),
+
+    // Workspace Panes
+    ToggleLeftGallery(bool),
+    ToggleRightInspector(bool),
+    ToggleFloatingBrowser(bool),
 
     // Photo
     ImportWallPhoto,
@@ -183,12 +192,17 @@ pub fn draw_top_ribbon(
     show_grid: bool,
     show_rulers: bool,
     show_architraves: bool,
+    selected_params: Option<&WindowParams>,
+    show_left_gallery: bool,
+    show_right_inspector: bool,
+    show_floating_browser: bool,
     view3d: &ViewportSettings,
     wall_solid: bool,
     state: &mut RibbonState,
 ) -> Vec<RibbonAction> {
     let mut actions = Vec::new();
     let is_multi = project.manifest.kind == ProjectKind::MultiWall;
+    let _ = &state.style_filter;
 
     // 1) Quick Access Header Bar
     egui::Frame::NONE
@@ -279,11 +293,36 @@ pub fn draw_top_ribbon(
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    if ribbon_pill_btn(ui, pal, VectorIcon::HelpTour, "Tour", false, true)
+                    if ribbon_icon_btn(ui, pal, VectorIcon::HelpTour, false, true)
                         .on_hover_text("Open interactive Getting Started Walkthrough")
                         .clicked()
                     {
                         actions.push(RibbonAction::OpenGettingStartedTour);
+                    }
+
+                    if ribbon_icon_btn(ui, pal, VectorIcon::PanelRight, show_right_inspector, true)
+                        .on_hover_text("Toggle Right Properties Inspector")
+                        .clicked()
+                    {
+                        actions.push(RibbonAction::ToggleRightInspector(!show_right_inspector));
+                    }
+                    if ribbon_icon_btn(
+                        ui,
+                        pal,
+                        VectorIcon::BrowserTree,
+                        show_floating_browser,
+                        true,
+                    )
+                    .on_hover_text("Toggle Floating Scene Browser Tree")
+                    .clicked()
+                    {
+                        actions.push(RibbonAction::ToggleFloatingBrowser(!show_floating_browser));
+                    }
+                    if ribbon_icon_btn(ui, pal, VectorIcon::PanelLeft, show_left_gallery, true)
+                        .on_hover_text("Toggle Left Visual Library Gallery")
+                        .clicked()
+                    {
+                        actions.push(RibbonAction::ToggleLeftGallery(!show_left_gallery));
                     }
 
                     let mut t = theme_mode;
@@ -560,55 +599,199 @@ pub fn draw_top_ribbon(
                     }
                 }
                 RibbonTab::Design => {
-                    ribbon_group(ui, pal, "Filter", |ui| {
-                        let mut f = state.style_filter;
-                        if segmented_pill(
-                            ui,
-                            pal,
-                            &mut f,
-                            &[
-                                (DesignStyleFilter::All, "All"),
-                                (DesignStyleFilter::Windows, "Win"),
-                                (DesignStyleFilter::Doors, "Door"),
-                            ],
-                        ) {
-                            state.style_filter = f;
+                    let has_sel = selected_params.is_some();
+                    let cur_style = selected_params.map(|p| p.style);
+                    let is_door = selected_params.is_some_and(|p| p.style.is_door());
+
+                    ribbon_group(ui, pal, "Swap Style", |ui| {
+                        let sel_name = cur_style.map_or("Choose Style...", |s| s.name());
+                        let sel_id = ui.make_persistent_id("ribbon_swap_style");
+                        ui.horizontal(|ui| {
+                            if let Some(cs) = cur_style {
+                                let (tr, _) =
+                                    ui.allocate_exact_size(Vec2::splat(22.0), Sense::hover());
+                                draw_style_thumbnail(ui.painter(), tr, cs, true, pal);
+                            }
+                            egui::ComboBox::from_id_salt(sel_id)
+                                .selected_text(sel_name)
+                                .width(138.0)
+                                .show_ui(ui, |ui| {
+                                    for s in WindowStyle::ALL {
+                                        let clicked = ui
+                                            .horizontal(|ui| {
+                                                let (tr, _) = ui.allocate_exact_size(
+                                                    Vec2::splat(20.0),
+                                                    Sense::hover(),
+                                                );
+                                                draw_style_thumbnail(
+                                                    ui.painter(),
+                                                    tr,
+                                                    s,
+                                                    cur_style == Some(s),
+                                                    pal,
+                                                );
+                                                ui.selectable_label(cur_style == Some(s), s.name())
+                                            })
+                                            .inner
+                                            .clicked();
+                                        if clicked {
+                                            actions.push(RibbonAction::SelectOrApplyStyle(s));
+                                            ui.close();
+                                        }
+                                    }
+                                });
+                        });
+                    });
+                    ui.separator();
+
+                    ribbon_group(ui, pal, "Trim Profile", |ui| {
+                        for (ap, lbl) in [
+                            (ArchitraveStyle::Flat, "Flat"),
+                            (ArchitraveStyle::Chamfered, "Chamfer"),
+                            (ArchitraveStyle::Stepped, "Stepped"),
+                            (ArchitraveStyle::ChamferedStepped, "Fancy"),
+                        ] {
+                            let active = selected_params.is_some_and(|p| p.architrave_style == ap);
+                            if ribbon_tile(
+                                ui,
+                                pal,
+                                VectorIcon::ArchitraveProfile,
+                                lbl,
+                                active,
+                                has_sel,
+                            )
+                            .on_hover_text(ap.name())
+                            .clicked()
+                            {
+                                actions.push(RibbonAction::ApplyArchitraveToSelection(ap));
+                            }
                         }
                     });
                     ui.separator();
 
-                    egui::ScrollArea::horizontal()
-                        .id_salt("design_style_strip")
-                        .max_width((ui.available_width() - 340.0).max(200.0))
-                        .show(ui, |ui| {
+                    ribbon_group(ui, pal, "Shutters & Header", |ui| {
+                        let allow_shutters = has_sel && !is_door;
+                        for (sh, lbl) in [
+                            (ShutterStyle::None, "None"),
+                            (ShutterStyle::Louvred, "Louvre"),
+                            (ShutterStyle::Panelled, "Panel"),
+                        ] {
+                            let active = selected_params.is_some_and(|p| p.shutter_style == sh);
+                            if ribbon_pill_btn(
+                                ui,
+                                pal,
+                                VectorIcon::Shutter,
+                                lbl,
+                                active,
+                                allow_shutters,
+                            )
+                            .on_hover_text(sh.name())
+                            .clicked()
+                            {
+                                actions.push(RibbonAction::ApplyShutterToSelection(sh));
+                            }
+                        }
+
+                        ui.add_enabled_ui(has_sel, |ui| {
+                            let cur_h = selected_params
+                                .map(|p| p.header_style)
+                                .unwrap_or(HeaderStyle::None);
+                            egui::ComboBox::from_id_salt("ribbon_header_style")
+                                .selected_text(match cur_h {
+                                    HeaderStyle::None => "Std Top",
+                                    HeaderStyle::FlatLintel => "Lintel",
+                                    HeaderStyle::KeystoneArch => "Keystone",
+                                    HeaderStyle::TriangularPediment => "Pediment",
+                                })
+                                .width(84.0)
+                                .show_ui(ui, |ui| {
+                                    for &hs in &HeaderStyle::ALL {
+                                        if ui.selectable_label(cur_h == hs, hs.name()).clicked() {
+                                            actions.push(RibbonAction::ApplyHeaderToSelection(hs));
+                                        }
+                                    }
+                                });
+                        });
+
+                        let supports_sill =
+                            selected_params.is_some_and(|p| p.style.supports_sill());
+                        let sill_on = selected_params.is_some_and(|p| p.sill_enabled);
+                        if ribbon_pill_btn(
+                            ui,
+                            pal,
+                            VectorIcon::Window,
+                            "Sill",
+                            sill_on && supports_sill,
+                            supports_sill,
+                        )
+                        .on_hover_text("Toggle projecting exterior window sill")
+                        .clicked()
+                        {
+                            actions.push(RibbonAction::ToggleSillOnSelection);
+                        }
+                    });
+                    ui.separator();
+
+                    ribbon_group(ui, pal, "Finish", |ui| {
+                        ui.vertical(|ui| {
                             ui.horizontal(|ui| {
-                                let styles: &[WindowStyle] = match state.style_filter {
-                                    DesignStyleFilter::All => &WindowStyle::ALL,
-                                    DesignStyleFilter::Windows => &WindowStyle::ALL_WINDOWS,
-                                    DesignStyleFilter::Doors => &WindowStyle::ALL_DOORS,
-                                };
-                                for &style in styles {
-                                    let (rect, resp) = ui.allocate_exact_size(
-                                        Vec2::splat(42.0),
-                                        Sense::click_and_drag(),
+                                let (ir, _) =
+                                    ui.allocate_exact_size(Vec2::splat(13.0), Sense::hover());
+                                paint_icon(ui.painter(), ir, VectorIcon::Palette, pal.text_muted);
+                                ui.label(RichText::new("Win").size(9.5).color(pal.text_muted));
+                                for fc in FilamentColor::ALL {
+                                    let rgb = fc.rgb_exterior();
+                                    let c32 = Color32::from_rgb(
+                                        (rgb[0] * 255.0) as u8,
+                                        (rgb[1] * 255.0) as u8,
+                                        (rgb[2] * 255.0) as u8,
                                     );
-                                    draw_style_thumbnail(ui.painter(), rect, style, false, pal);
-                                    if resp.drag_started() {
-                                        egui::DragAndDrop::set_payload(
-                                            ui.ctx(),
-                                            CanvasDragPayload::Style(style),
+                                    let active = view3d.filament_color == fc;
+                                    let (r, resp) =
+                                        ui.allocate_exact_size(Vec2::splat(13.0), Sense::click());
+                                    ui.painter().circle_filled(r.center(), 5.0, c32);
+                                    if active {
+                                        ui.painter().circle_stroke(
+                                            r.center(),
+                                            6.2,
+                                            Stroke::new(1.3, pal.gold),
                                         );
                                     }
-                                    let resp = resp.on_hover_text(format!(
-                                        "{} (click to add/apply, or drag onto Blueprint 2D)",
-                                        style.name()
-                                    ));
-                                    if resp.clicked() {
-                                        actions.push(RibbonAction::SelectOrApplyStyle(style));
+                                    if resp.on_hover_text(format!("Exterior: {}", fc.name())).clicked() {
+                                        actions.push(RibbonAction::SetFilamentExterior(fc));
+                                    }
+                                }
+                            });
+                            ui.horizontal(|ui| {
+                                let (ir, _) =
+                                    ui.allocate_exact_size(Vec2::splat(13.0), Sense::hover());
+                                paint_icon(ui.painter(), ir, VectorIcon::Door, pal.text_muted);
+                                ui.label(RichText::new("Door").size(9.5).color(pal.text_muted));
+                                for fc in FilamentColor::ALL {
+                                    let rgb = fc.rgb_exterior();
+                                    let c32 = Color32::from_rgb(
+                                        (rgb[0] * 255.0) as u8,
+                                        (rgb[1] * 255.0) as u8,
+                                        (rgb[2] * 255.0) as u8,
+                                    );
+                                    let active = view3d.door_color == fc;
+                                    let (r, resp) =
+                                        ui.allocate_exact_size(Vec2::splat(13.0), Sense::click());
+                                    ui.painter().circle_filled(r.center(), 5.0, c32);
+                                    if active {
+                                        ui.painter().circle_stroke(
+                                            r.center(),
+                                            6.2,
+                                            Stroke::new(1.3, pal.gold),
+                                        );
+                                    }
+                                    if resp.on_hover_text(format!("Door: {}", fc.name())).clicked() {
+                                        actions.push(RibbonAction::SetFilamentDoor(fc));
                                     }
                                 }
                             });
                         });
+                    });
 
                     ui.separator();
                     ribbon_group(ui, pal, "Reuse & Scale", |ui| {
@@ -639,7 +822,7 @@ pub fn draw_top_ribbon(
                         }
                         egui::ComboBox::from_id_salt("ribbon_scale")
                             .selected_text(project.manifest.scale_preset.short_label())
-                            .width(68.0)
+                            .width(66.0)
                             .show_ui(ui, |ui| {
                                 for sc in ScalePreset::ALL {
                                     if ui
@@ -808,6 +991,45 @@ pub fn draw_top_ribbon(
                     });
                 }
                 RibbonTab::View => {
+                    ribbon_group(ui, pal, "Workspace Panes", |ui| {
+                        if ribbon_tile(
+                            ui,
+                            pal,
+                            VectorIcon::PanelLeft,
+                            "Library",
+                            show_left_gallery,
+                            true,
+                        )
+                        .clicked()
+                        {
+                            actions.push(RibbonAction::ToggleLeftGallery(!show_left_gallery));
+                        }
+                        if ribbon_tile(
+                            ui,
+                            pal,
+                            VectorIcon::BrowserTree,
+                            "Browser",
+                            show_floating_browser,
+                            true,
+                        )
+                        .clicked()
+                        {
+                            actions.push(RibbonAction::ToggleFloatingBrowser(!show_floating_browser));
+                        }
+                        if ribbon_tile(
+                            ui,
+                            pal,
+                            VectorIcon::PanelRight,
+                            "Inspector",
+                            show_right_inspector,
+                            true,
+                        )
+                        .clicked()
+                        {
+                            actions.push(RibbonAction::ToggleRightInspector(!show_right_inspector));
+                        }
+                    });
+                    ui.separator();
                     ribbon_group(ui, pal, "3D Camera", |ui| {
                         for (preset, lbl) in [
                             (CameraPreset::Isometric, "Iso"),
@@ -1012,8 +1234,53 @@ fn ribbon_group(
 ) {
     ui.vertical(|ui| {
         ui.horizontal(add_contents);
-        ui.label(RichText::new(title).size(10.5).color(pal.text_muted));
+        ui.label(RichText::new(title).size(9.5).color(pal.text_muted));
     });
+}
+
+fn ribbon_icon_btn(
+    ui: &mut egui::Ui,
+    pal: &StudioPalette,
+    icon: VectorIcon,
+    active: bool,
+    enabled: bool,
+) -> egui::Response {
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, resp) = ui.allocate_exact_size(Vec2::splat(26.0), sense);
+    let bg = if !enabled {
+        pal.surface_base
+    } else if active {
+        pal.accent
+    } else if resp.hovered() {
+        pal.surface_elevated
+    } else {
+        pal.surface_panel
+    };
+    let fg = if !enabled {
+        pal.text_muted
+    } else if active {
+        pal.accent_text
+    } else {
+        pal.text_primary
+    };
+    ui.painter().rect_filled(rect, 5.0, bg);
+    ui.painter().rect_stroke(
+        rect,
+        5.0,
+        Stroke::new(1.0, if active { pal.accent } else { pal.border }),
+        egui::StrokeKind::Inside,
+    );
+    paint_icon(
+        ui.painter(),
+        Rect::from_center_size(rect.center(), Vec2::splat(16.5)),
+        icon,
+        fg,
+    );
+    resp
 }
 
 fn ribbon_tile(
@@ -1024,8 +1291,8 @@ fn ribbon_tile(
     active: bool,
     enabled: bool,
 ) -> egui::Response {
-    let w = (label.len() as f32 * 6.5 + 22.0).max(58.0);
-    let size = Vec2::new(w, 46.0);
+    let w = (label.len() as f32 * 5.2 + 16.0).max(52.0);
+    let size = Vec2::new(w, 48.0);
     let sense = if enabled {
         Sense::click()
     } else {
@@ -1065,15 +1332,15 @@ fn ribbon_tile(
         egui::StrokeKind::Inside,
     );
     let icon_rect = Rect::from_center_size(
-        egui::pos2(rect.center().x, rect.top() + 14.5),
-        Vec2::splat(17.0),
+        egui::pos2(rect.center().x, rect.top() + 17.0),
+        Vec2::splat(24.0),
     );
     paint_icon(ui.painter(), icon_rect, icon, fg);
     ui.painter().text(
-        egui::pos2(rect.center().x, rect.bottom() - 8.5),
+        egui::pos2(rect.center().x, rect.bottom() - 7.5),
         Align2::CENTER_CENTER,
         label,
-        egui::FontId::proportional(11.3),
+        egui::FontId::proportional(9.8),
         fg,
     );
     resp
@@ -1087,8 +1354,8 @@ fn ribbon_pill_btn(
     active: bool,
     enabled: bool,
 ) -> egui::Response {
-    let w = (label.len() as f32 * 6.8 + 30.0).max(52.0);
-    let size = Vec2::new(w, 25.0);
+    let w = (label.len() as f32 * 5.8 + 28.0).max(46.0);
+    let size = Vec2::new(w, 26.0);
     let sense = if enabled {
         Sense::click()
     } else {
@@ -1128,15 +1395,15 @@ fn ribbon_pill_btn(
         egui::StrokeKind::Inside,
     );
     let icon_rect = Rect::from_center_size(
-        egui::pos2(rect.left() + 12.0, rect.center().y),
-        Vec2::splat(14.0),
+        egui::pos2(rect.left() + 11.5, rect.center().y),
+        Vec2::splat(16.0),
     );
     paint_icon(ui.painter(), icon_rect, icon, fg);
     ui.painter().text(
         egui::pos2(rect.left() + 22.0, rect.center().y),
         Align2::LEFT_CENTER,
         label,
-        egui::FontId::proportional(12.2),
+        egui::FontId::proportional(10.8),
         fg,
     );
     resp
