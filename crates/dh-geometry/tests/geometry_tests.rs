@@ -406,3 +406,171 @@ fn opening_windows_print_in_place_cone_hinges_are_watertight_zero_overhang() {
         }
     }
 }
+
+#[test]
+fn solid_door_panelling_is_on_exterior_face_and_interior_is_optional() {
+    fn count_inner_zone_z_band(
+        mesh: &dh_geometry::TriMesh,
+        z_min: f32,
+        z_max: f32,
+        half_x: f32,
+        y_min: f32,
+        y_max: f32,
+    ) -> usize {
+        mesh.positions
+            .iter()
+            .filter(|p| {
+                p[2] > z_min && p[2] < z_max && p[0].abs() < half_x && p[1] > y_min && p[1] < y_max
+            })
+            .count()
+    }
+
+    for style in [
+        WindowStyle::DoorColonial4Panel,
+        WindowStyle::DoorGeorgian6Panel,
+        WindowStyle::DoorArchedHeritage,
+    ] {
+        // Default: exterior has raised-panel V-grooves; interior face is plain flat
+        let mut p_ext_only = WindowParams::default();
+        style.apply_style_defaults(&mut p_ext_only);
+        p_ext_only.bars_x = 0;
+        p_ext_only.bars_y = 0;
+        p_ext_only.door_thickness = 4.0;
+        p_ext_only.door_interior_panels = false;
+
+        let win_ext = build_window(&p_ext_only);
+        assert!(win_ext.printable_ok, "Failed ext-only for {:?}", style);
+        let leaf_ext = &win_ext.door_leaves[0].mesh;
+        let t = win_ext.door_leaves[0].leaf_thickness;
+        let ext_groove_verts =
+            count_inner_zone_z_band(leaf_ext, t - 1.0, t - 0.08, 27.0, -70.0, 44.0);
+        let int_groove_verts = count_inner_zone_z_band(leaf_ext, 0.08, 0.56, 27.0, -70.0, 44.0);
+        assert!(
+            ext_groove_verts >= 6,
+            "{:?} expected exterior grooves on top face, got {ext_groove_verts}",
+            style
+        );
+        assert_eq!(
+            int_groove_verts, 0,
+            "{:?} expected flat interior face when door_interior_panels=false, got {int_groove_verts}",
+            style
+        );
+
+        // Optional interior panels enabled: BOTH exterior and interior faces have grooves
+        let mut p_both = p_ext_only;
+        p_both.door_interior_panels = true;
+        let win_both = build_window(&p_both);
+        assert!(win_both.printable_ok, "Failed both-sides for {:?}", style);
+        let leaf_both = &win_both.door_leaves[0].mesh;
+        let ext_both = count_inner_zone_z_band(leaf_both, t - 1.0, t - 0.08, 27.0, -70.0, 44.0);
+        let int_both = count_inner_zone_z_band(leaf_both, 0.08, 0.56, 27.0, -70.0, 44.0);
+        assert!(
+            ext_both >= 6,
+            "{:?} lost exterior grooves when interior enabled",
+            style
+        );
+        assert!(
+            int_both >= 6,
+            "{:?} missing interior grooves when door_interior_panels=true (got {int_both})",
+            style
+        );
+    }
+
+    // Glazed Fanlight & French doors: exterior half ALWAYS has kick panels; interior half ONLY when opted in
+    for (style, max_panel_y) in [
+        (WindowStyle::DoorFanlightGeorgian, 10.0f32),
+        (WindowStyle::DoorGlazedFrench, -28.0f32),
+    ] {
+        let count_lower_panel = |mesh: &dh_geometry::TriMesh| -> usize {
+            mesh.positions
+                .iter()
+                .filter(|p| {
+                    p[2] > 0.08
+                        && p[2] < 0.95
+                        && p[0].abs() < 22.0
+                        && p[1] > -75.0
+                        && p[1] < max_panel_y
+                })
+                .count()
+        };
+
+        let mut p_fan = WindowParams::default();
+        style.apply_style_defaults(&mut p_fan);
+        p_fan.door_interior_panels = false;
+        let w_fan_off = build_window(&p_fan);
+        assert!(w_fan_off.printable_ok);
+        let ext_half = w_fan_off.door_leaves[0].exterior_leaf.as_ref().unwrap();
+        assert!(count_lower_panel(ext_half) >= 4);
+        assert_eq!(count_lower_panel(&w_fan_off.door_leaves[0].mesh), 0);
+
+        p_fan.door_interior_panels = true;
+        let w_fan_on = build_window(&p_fan);
+        assert!(w_fan_on.printable_ok);
+        assert!(count_lower_panel(&w_fan_on.door_leaves[0].mesh) >= 4);
+    }
+}
+
+#[test]
+fn door_panelling_survives_letterbox_and_cat_flap_additions() {
+    let count_z_band = |mesh: &dh_geometry::TriMesh, z_min: f32, z_max: f32, max_y: f32| -> usize {
+        mesh.positions
+            .iter()
+            .filter(|p| {
+                p[2] > z_min && p[2] < z_max && p[0].abs() < 22.0 && p[1] > -65.0 && p[1] < max_y
+            })
+            .count()
+    };
+
+    for style in [
+        WindowStyle::DoorColonial4Panel,
+        WindowStyle::DoorGeorgian6Panel,
+        WindowStyle::DoorArchedHeritage,
+        WindowStyle::DoorFanlightGeorgian,
+    ] {
+        for door_t in [2.6, 4.0] {
+            let mut params = WindowParams::default();
+            style.apply_style_defaults(&mut params);
+            if style == WindowStyle::DoorArchedHeritage {
+                params.bars_x = 0;
+                params.bars_y = 0;
+            }
+            params.door_thickness = door_t;
+            params.door_interior_panels = true;
+            params.letterbox_enabled = true;
+            params.cat_flap_enabled = true;
+
+            let win = build_window(&params);
+            assert!(
+                win.printable_ok,
+                "Printable check failed for {:?} (door_t={door_t}): ext={}, int={}",
+                style, win.ext_diag, win.int_diag
+            );
+
+            let leaf = &win.door_leaves[0];
+            if let Some(ext_half) = &leaf.exterior_leaf {
+                assert!(
+                    count_z_band(ext_half, 0.08, 0.95, 10.0) >= 4,
+                    "{:?} ext_half lost panel grooves with letterbox+cat_flap",
+                    style
+                );
+                assert!(
+                    count_z_band(&leaf.mesh, 0.08, 0.95, 10.0) >= 4,
+                    "{:?} int_half lost panel grooves with letterbox+cat_flap",
+                    style
+                );
+            } else {
+                let t = leaf.leaf_thickness;
+                assert!(
+                    count_z_band(&leaf.mesh, t - 1.0, t - 0.08, 65.0) >= 4,
+                    "{:?} lost exterior panel grooves with letterbox+cat_flap (door_t={door_t})",
+                    style
+                );
+                assert!(
+                    count_z_band(&leaf.mesh, 0.08, 0.95, 65.0) >= 4,
+                    "{:?} lost interior panel grooves with letterbox+cat_flap (door_t={door_t})",
+                    style
+                );
+            }
+        }
+    }
+}

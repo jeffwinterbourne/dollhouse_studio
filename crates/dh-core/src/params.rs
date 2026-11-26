@@ -847,6 +847,9 @@ pub struct WindowParams {
     /// Solid lower kick-panel height ratio for glazed doors (`0.0..0.6`).
     #[serde(default = "default_lower_panel_ratio")]
     pub lower_panel_ratio: f64,
+    /// Also carve decorative recessed panelling on the interior face of hinged doors (exterior always has panelling).
+    #[serde(default)]
+    pub door_interior_panels: bool,
     /// Selected handle hardware style for hinged doors.
     #[serde(default)]
     pub door_handle_style: DoorHandleStyle,
@@ -972,6 +975,7 @@ impl Default for WindowParams {
             door_thickness: 4.0,
             hinge_clearance: 0.35,
             lower_panel_ratio: 0.32,
+            door_interior_panels: false,
             door_handle_style: DoorHandleStyle::ModernLever,
             letterbox_enabled: false,
             letterbox_height_ratio: 0.48,
@@ -1205,5 +1209,133 @@ impl WindowParams {
             effective_ext_chamfer,
             effective_int_chamfer,
         }
+    }
+
+    /// Deterministic hash covering every field of `WindowParams` (compile-time enforced via destructuring).
+    pub fn content_hash(&self) -> u64 {
+        #[inline]
+        fn mix(h: &mut u64, v: u64) {
+            *h ^= v;
+            *h = h.wrapping_mul(0x100000001b3);
+        }
+        #[inline]
+        fn mix_f64(h: &mut u64, v: &f64) {
+            let norm = if *v == 0.0 { 0.0 } else { *v };
+            mix(h, norm.to_bits());
+        }
+
+        let Self {
+            style,
+            opening_width,
+            opening_height,
+            wall_thickness,
+            trim_width,
+            trim_thickness,
+            interior_trim_width,
+            interior_trim_thickness,
+            match_interior_trim,
+            architrave_style,
+            chamfer_size,
+            chamfer_interior,
+            chamfer_bars,
+            bar_chamfer_size,
+            groove_style,
+            groove_width,
+            shutter_style,
+            shutter_width_ratio,
+            header_style,
+            flower_box_enabled,
+            flush_top_mode,
+            flush_bottom_sill,
+            flush_left_jamb,
+            flush_right_jamb,
+            flush_trim_setback,
+            double_doors,
+            hinge_right,
+            door_thickness,
+            hinge_clearance,
+            lower_panel_ratio,
+            door_interior_panels,
+            door_handle_style,
+            letterbox_enabled,
+            letterbox_height_ratio,
+            cat_flap_enabled,
+            cat_flap_width,
+            cat_flap_height,
+            window_opening_mode,
+            sill_enabled,
+            sill_overhang,
+            sill_depth,
+            frame_width,
+            bars_x,
+            bars_y,
+            bar_width,
+            meeting_rail_width,
+            split_ratio,
+            arch_spokes,
+            diamond_pitch,
+            acetate_thickness,
+            acetate_clearance,
+            wall_fit_clearance,
+            index_clearance,
+            plate_spacing,
+        } = self;
+
+        let mut h: u64 = 0xcbf29ce484222325;
+        mix(&mut h, *style as u64);
+        mix_f64(&mut h, opening_width);
+        mix_f64(&mut h, opening_height);
+        mix_f64(&mut h, wall_thickness);
+        mix_f64(&mut h, trim_width);
+        mix_f64(&mut h, trim_thickness);
+        mix_f64(&mut h, interior_trim_width);
+        mix_f64(&mut h, interior_trim_thickness);
+        mix(&mut h, u64::from(*match_interior_trim));
+        mix(&mut h, *architrave_style as u64);
+        mix_f64(&mut h, chamfer_size);
+        mix(&mut h, u64::from(*chamfer_interior));
+        mix(&mut h, u64::from(*chamfer_bars));
+        mix_f64(&mut h, bar_chamfer_size);
+        mix(&mut h, *groove_style as u64);
+        mix_f64(&mut h, groove_width);
+        mix(&mut h, *shutter_style as u64);
+        mix_f64(&mut h, shutter_width_ratio);
+        mix(&mut h, *header_style as u64);
+        mix(&mut h, u64::from(*flower_box_enabled));
+        mix(&mut h, *flush_top_mode as u64);
+        mix(&mut h, u64::from(*flush_bottom_sill));
+        mix(&mut h, u64::from(*flush_left_jamb));
+        mix(&mut h, u64::from(*flush_right_jamb));
+        mix_f64(&mut h, flush_trim_setback);
+        mix(&mut h, u64::from(*double_doors));
+        mix(&mut h, u64::from(*hinge_right));
+        mix_f64(&mut h, door_thickness);
+        mix_f64(&mut h, hinge_clearance);
+        mix_f64(&mut h, lower_panel_ratio);
+        mix(&mut h, u64::from(*door_interior_panels));
+        mix(&mut h, *door_handle_style as u64);
+        mix(&mut h, u64::from(*letterbox_enabled));
+        mix_f64(&mut h, letterbox_height_ratio);
+        mix(&mut h, u64::from(*cat_flap_enabled));
+        mix_f64(&mut h, cat_flap_width);
+        mix_f64(&mut h, cat_flap_height);
+        mix(&mut h, *window_opening_mode as u64);
+        mix(&mut h, u64::from(*sill_enabled));
+        mix_f64(&mut h, sill_overhang);
+        mix_f64(&mut h, sill_depth);
+        mix_f64(&mut h, frame_width);
+        mix(&mut h, u64::from(*bars_x));
+        mix(&mut h, u64::from(*bars_y));
+        mix_f64(&mut h, bar_width);
+        mix_f64(&mut h, meeting_rail_width);
+        mix_f64(&mut h, split_ratio);
+        mix(&mut h, u64::from(*arch_spokes));
+        mix_f64(&mut h, diamond_pitch);
+        mix_f64(&mut h, acetate_thickness);
+        mix_f64(&mut h, acetate_clearance);
+        mix_f64(&mut h, wall_fit_clearance);
+        mix_f64(&mut h, index_clearance);
+        mix_f64(&mut h, plate_spacing);
+        h
     }
 }

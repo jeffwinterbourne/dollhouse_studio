@@ -1,9 +1,10 @@
 use dh_core::{DisplayUnit, Project, ScalePreset, WindowOpeningMode, WindowParams, WindowStyle};
 use dh_export::{
     BedSizePreset, PageOrientation, PaperSize, PdfExportOptions, PdfInstanceMode,
-    estimate_pdf_pages, pack_project_onto_build_plates, pack_wall_onto_build_plates,
-    write_binary_stl_to_writer, write_piece_pdf_bytes, write_project_booklet_pdf_bytes,
-    write_wall_pdf_bytes, write_wall_svg_to_string, write_window_svg_to_string,
+    collect_piece_individual_stls, estimate_pdf_pages, pack_piece_onto_build_plates,
+    pack_project_onto_build_plates, pack_wall_onto_build_plates, write_binary_stl_to_writer,
+    write_piece_pdf_bytes, write_project_booklet_pdf_bytes, write_wall_pdf_bytes,
+    write_wall_svg_to_string, write_window_svg_to_string,
 };
 use dh_geometry::build_window;
 
@@ -141,4 +142,102 @@ fn project_booklet_and_single_piece_standard_pdf_generate_cleanly() {
     let single_pdf = write_piece_pdf_bytes(&win, "Single Test", &opts);
     assert!(single_pdf.starts_with(b"%PDF-1.4"));
     assert!(String::from_utf8_lossy(&single_pdf).contains("Single Test"));
+}
+
+#[test]
+fn bed_aware_piece_plate_packing_respects_bed_dimensions_and_splits_when_needed() {
+    let mut params = WindowParams::default();
+    WindowStyle::DoorGeorgian6Panel.apply_style_defaults(&mut params);
+    params.letterbox_enabled = true;
+    params.cat_flap_enabled = true;
+    let door = build_window(&params);
+
+    for (preset, expect_split) in [
+        (BedSizePreset::Bambu256, false),
+        (BedSizePreset::Standard220, true),
+    ] {
+        let (bw, bh) = preset.dimensions_mm();
+        let report = pack_piece_onto_build_plates(&door, bw, bh, 6.0);
+        assert!(!report.plates.is_empty());
+        assert!(
+            report.oversized_parts.is_empty(),
+            "{:?} had oversized parts: {:?}",
+            preset,
+            report.oversized_parts
+        );
+        if expect_split {
+            assert!(
+                report.plates.len() >= 2,
+                "Expected 220x220 bed to split door across >=2 plates"
+            );
+        }
+        for (idx, plate) in report.plates.iter().enumerate() {
+            let (bmin, bmax) = plate.bounds();
+            let span_x = bmax[0] - bmin[0];
+            let span_y = bmax[1] - bmin[1];
+            assert!(
+                span_x <= bw + 0.01 && span_y <= bh + 0.01,
+                "{:?} plate {idx} ({span_x:.1}x{span_y:.1}) exceeds {bw}x{bh}",
+                preset
+            );
+            let diag = plate.verify_printable_manifold().unwrap();
+            assert_eq!(diag.overhang_triangles, 0);
+            assert!(diag.min_z.abs() < 1e-4);
+        }
+    }
+
+    // Standard single window must pack onto Plate 1 of Mini 180x180 bed
+    let win = build_window(&WindowParams::default());
+    let (mw, mh) = BedSizePreset::Mini180.dimensions_mm();
+    let win_report = pack_piece_onto_build_plates(&win, mw, mh, 6.0);
+    assert_eq!(win_report.plates.len(), 1);
+    let (wmin, wmax) = win_report.plates[0].bounds();
+    assert!(wmax[0] - wmin[0] <= mw && wmax[1] - wmin[1] <= mh);
+}
+
+#[test]
+fn individual_per_part_stl_export_outputs_distinct_watertight_parts() {
+    let mut params = WindowParams::default();
+    WindowStyle::DoorGeorgian6Panel.apply_style_defaults(&mut params);
+    params.letterbox_enabled = true;
+    params.cat_flap_enabled = true;
+    let door = build_window(&params);
+
+    let parts = collect_piece_individual_stls("Front Door", &door);
+    let names: Vec<&str> = parts.iter().map(|(n, _)| n.as_str()).collect();
+    assert_eq!(
+        parts.len(),
+        6,
+        "Expected 6 separate STL parts, got {:?}",
+        names
+    );
+    assert!(names.contains(&"front_door_exterior_frame"));
+    assert!(names.contains(&"front_door_interior_frame"));
+    assert!(names.contains(&"front_door_door_leaf"));
+    assert!(names.contains(&"front_door_door_handles"));
+    assert!(names.contains(&"front_door_letterbox_plates"));
+    assert!(names.contains(&"front_door_cat_flap"));
+
+    for (name, mesh) in &parts {
+        let diag = mesh
+            .verify_printable_manifold()
+            .unwrap_or_else(|e| panic!("Individual STL part {name} failed: {e}"));
+        assert_eq!(diag.overhang_triangles, 0);
+        assert!(diag.min_z.abs() < 1e-4);
+        let (bmin, bmax) = mesh.bounds();
+        assert!(((bmin[0] + bmax[0]) * 0.5).abs() < 1e-3);
+        assert!(((bmin[1] + bmax[1]) * 0.5).abs() < 1e-3);
+    }
+
+    // Glazed Double French Fanlight door should produce separate interior & exterior leaves
+    let mut double_fan = WindowParams::default();
+    WindowStyle::DoorFanlightGeorgian.apply_style_defaults(&mut double_fan);
+    double_fan.double_doors = true;
+    let built_dbl = build_window(&double_fan);
+    let dbl_parts = collect_piece_individual_stls("Patio", &built_dbl);
+    let dbl_names: Vec<&str> = dbl_parts.iter().map(|(n, _)| n.as_str()).collect();
+    assert!(dbl_names.contains(&"patio_door_leaf_left"));
+    assert!(dbl_names.contains(&"patio_door_leaf_left_exterior"));
+    assert!(dbl_names.contains(&"patio_door_leaf_right"));
+    assert!(dbl_names.contains(&"patio_door_leaf_right_exterior"));
 }

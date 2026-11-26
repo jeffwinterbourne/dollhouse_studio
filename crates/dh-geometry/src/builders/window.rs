@@ -54,7 +54,9 @@ pub struct GeneratedWindow {
     pub window_sashes: Vec<WindowSashAsset>,
     /// Separately printable door handle + escutcheon + letterbox/cat-flap set (empty for windows).
     pub door_handle: TriMesh,
-    /// Combined print plate mesh (all printable parts arranged side-by-side at `z = 0`).
+    /// Logically grouped separate printable hardware parts for individual STL export & tight plate packing.
+    pub hardware_parts: Vec<(String, TriMesh)>,
+    /// Combined print plate mesh (all printable parts packed cleanly at `z = 0`).
     pub print_plate: TriMesh,
     /// Exterior half diagnostic summary.
     pub ext_diag: String,
@@ -77,6 +79,76 @@ impl GeneratedWindow {
         }
         out
     }
+
+    /// Returns each logical printable sub-part centered at `(0, 0)` on `Z = 0` with a clean stem name.
+    pub fn named_printable_parts(&self) -> Vec<(String, TriMesh)> {
+        let mut out = Vec::new();
+        if self.is_door {
+            if !self.exterior_half.triangles.is_empty() {
+                out.push((
+                    "exterior_frame".to_string(),
+                    center_mesh_on_bed(self.exterior_half.clone()),
+                ));
+            }
+            if !self.interior_half.triangles.is_empty() {
+                out.push((
+                    "interior_frame".to_string(),
+                    center_mesh_on_bed(self.interior_half.clone()),
+                ));
+            }
+            let leaf_count = self.door_leaves.len();
+            for (i, leaf) in self.door_leaves.iter().enumerate() {
+                let stem = if leaf_count == 1 {
+                    "door_leaf"
+                } else if i == 0 {
+                    "door_leaf_left"
+                } else {
+                    "door_leaf_right"
+                };
+                if !leaf.mesh.triangles.is_empty() {
+                    out.push((stem.to_string(), center_mesh_on_bed(leaf.mesh.clone())));
+                }
+                if let Some(ext_leaf) = &leaf.exterior_leaf
+                    && !ext_leaf.triangles.is_empty()
+                {
+                    out.push((
+                        format!("{stem}_exterior"),
+                        center_mesh_on_bed(ext_leaf.clone()),
+                    ));
+                }
+            }
+            for (name, mesh) in &self.hardware_parts {
+                if !mesh.triangles.is_empty() {
+                    out.push((name.clone(), center_mesh_on_bed(mesh.clone())));
+                }
+            }
+        } else {
+            let ext_asm = self.printable_exterior_assembly();
+            let ext_name = if self.window_sashes.is_empty() {
+                "exterior_frame"
+            } else {
+                "exterior_frame_with_sashes"
+            };
+            if !ext_asm.triangles.is_empty() {
+                out.push((ext_name.to_string(), center_mesh_on_bed(ext_asm)));
+            }
+            if !self.interior_half.triangles.is_empty() {
+                out.push((
+                    "interior_frame".to_string(),
+                    center_mesh_on_bed(self.interior_half.clone()),
+                ));
+            }
+        }
+        out
+    }
+}
+
+fn center_mesh_on_bed(mut mesh: TriMesh) -> TriMesh {
+    let (bmin, bmax) = mesh.bounds();
+    let cx = (bmin[0] + bmax[0]) * 0.5;
+    let cy = (bmin[1] + bmax[1]) * 0.5;
+    mesh.translate(-cx, -cy, -bmin[2]);
+    mesh
 }
 
 pub fn profile_kind(style: WindowStyle) -> ProfileKind {
@@ -733,11 +805,13 @@ pub fn build_window(raw_params: &WindowParams) -> GeneratedWindow {
         outer_chamfer: ext_outer_chamfer,
         hole_chamfer: bar_c,
         grooves: ext_grooves,
+        top_grooves: Vec::new(),
     };
     let int_moulding = MouldingConfig {
         outer_chamfer: int_outer_chamfer,
         hole_chamfer: bar_c,
         grooves: int_grooves,
+        top_grooves: Vec::new(),
     };
 
     if params.style.is_door() {
@@ -748,7 +822,7 @@ pub fn build_window(raw_params: &WindowParams) -> GeneratedWindow {
             specs.acetate_is_rectangular = true;
         }
 
-        // Arrange all printable parts side-by-side on Z=0 for the combined print plate
+        // Arrange all printable parts onto bed-aware plates on Z=0 for the combined print plate preview
         let mut parts: Vec<TriMesh> = Vec::new();
         parts.push(door_out.exterior_frame.clone());
         parts.push(door_out.interior_frame.clone());
@@ -758,8 +832,10 @@ pub fn build_window(raw_params: &WindowParams) -> GeneratedWindow {
                 parts.push(ext_leaf.clone());
             }
         }
-        if !door_out.door_handle.triangles.is_empty() {
-            parts.push(door_out.door_handle.clone());
+        for (_, hw_mesh) in &door_out.hardware_parts {
+            if !hw_mesh.triangles.is_empty() {
+                parts.push(hw_mesh.clone());
+            }
         }
 
         let print_plate = pack_meshes_on_bed(&parts, params.plate_spacing as f32);
@@ -809,6 +885,7 @@ pub fn build_window(raw_params: &WindowParams) -> GeneratedWindow {
                 door_leaves: door_out.door_leaves,
                 window_sashes: Vec::new(),
                 door_handle: door_out.door_handle,
+                hardware_parts: door_out.hardware_parts,
                 print_plate,
                 ext_diag,
                 int_diag: err_msg,
@@ -832,6 +909,7 @@ pub fn build_window(raw_params: &WindowParams) -> GeneratedWindow {
             door_leaves: door_out.door_leaves,
             window_sashes: Vec::new(),
             door_handle: door_out.door_handle,
+            hardware_parts: door_out.hardware_parts,
             print_plate,
             ext_diag,
             int_diag,
@@ -1134,6 +1212,7 @@ pub fn build_window(raw_params: &WindowParams) -> GeneratedWindow {
         door_leaves: Vec::new(),
         window_sashes,
         door_handle: TriMesh::default(),
+        hardware_parts: Vec::new(),
         print_plate,
         ext_diag,
         int_diag,
@@ -1142,31 +1221,34 @@ pub fn build_window(raw_params: &WindowParams) -> GeneratedWindow {
 }
 
 fn pack_meshes_on_bed(meshes: &[TriMesh], spacing: f32) -> TriMesh {
-    let mut widths = Vec::with_capacity(meshes.len());
-    let mut bounds_list = Vec::with_capacity(meshes.len());
-    let mut total_w = 0.0f32;
-    for m in meshes {
-        let (bmin, bmax) = m.bounds();
-        let w = (bmax[0] - bmin[0]).max(0.1);
-        widths.push(w);
-        bounds_list.push((bmin, bmax));
-        total_w += w;
-    }
-    if meshes.len() > 1 {
-        total_w += spacing * (meshes.len() as f32 - 1.0);
-    }
-
+    const DEFAULT_BED_MM: f32 = 256.0;
+    let sizes: Vec<(f32, f32)> = meshes
+        .iter()
+        .map(|m| {
+            let (bmin, bmax) = m.bounds();
+            ((bmax[0] - bmin[0]).max(0.1), (bmax[1] - bmin[1]).max(0.1))
+        })
+        .collect();
+    let layout =
+        crate::packer::pack_part_bounds_onto_beds(&sizes, DEFAULT_BED_MM, DEFAULT_BED_MM, spacing);
     let mut out = TriMesh::default();
-    let mut cursor_x = -total_w * 0.5;
-    for (idx, m) in meshes.iter().enumerate() {
-        let (bmin, bmax) = bounds_list[idx];
-        let cx = (bmin[0] + bmax[0]) * 0.5;
-        let cy = (bmin[1] + bmax[1]) * 0.5;
-        let w = widths[idx];
+    for pl in layout.placements {
+        let m = &meshes[pl.part_index];
+        if m.triangles.is_empty() {
+            continue;
+        }
         let mut copy = m.clone();
-        copy.translate(cursor_x + w * 0.5 - cx, -cy, -bmin[2]);
+        if pl.rotated_90 {
+            copy.rotate_z_90_ccw();
+        }
+        let (bmin, _) = copy.bounds();
+        let plate_shift_x = pl.plate_index as f32 * (DEFAULT_BED_MM + 20.0);
+        copy.translate(
+            plate_shift_x + pl.target_min_x - bmin[0],
+            pl.target_min_y - bmin[1],
+            -bmin[2],
+        );
         out.append(&copy);
-        cursor_x += w + spacing;
     }
     out
 }
@@ -1674,6 +1756,7 @@ fn build_one_cone_hinged_sash(
             outer_chamfer: Some((0.28, 0.34)),
             hole_chamfer: bar_c,
             grooves: Vec::new(),
+            top_grooves: Vec::new(),
         },
     );
     sash_mesh.append(&sock_k0);

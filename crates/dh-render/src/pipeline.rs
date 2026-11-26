@@ -28,6 +28,7 @@ pub struct ViewportSettings {
     pub wall_color: FilamentColor,
     pub explode_distance: f32,
     pub door_open_deg: f32,
+    pub bed_dimensions_mm: (f32, f32),
     pub show_wall_cutaway: bool,
     pub show_wireframe: bool,
     pub highlight_overhangs: bool,
@@ -44,6 +45,7 @@ impl Default for ViewportSettings {
             wall_color: FilamentColor::WarmCream,
             explode_distance: 22.0,
             door_open_deg: 25.0,
+            bed_dimensions_mm: (256.0, 256.0),
             show_wall_cutaway: true,
             show_wireframe: false,
             highlight_overhangs: false,
@@ -105,6 +107,7 @@ struct GlPipeline {
     leaf_gpus: Vec<LeafGpu>,
     sash_gpus: Vec<WindowSashGpu>,
     handle_set_gpu: Option<MeshGpu>,
+    hardware_part_gpus: Vec<(String, MeshGpu)>,
     project_wall_gpu: Option<MeshGpu>,
     project_openings_gpu: Vec<PlacedOpeningGpu>,
     uploaded_wall_version: u64,
@@ -113,6 +116,8 @@ struct GlPipeline {
     grid_vao: glow::VertexArray,
     grid_vbo: glow::Buffer,
     grid_vertex_count: i32,
+    bed_outline_vao: glow::VertexArray,
+    bed_outline_vbo: glow::Buffer,
     uploaded_version: u64,
 }
 
@@ -452,95 +457,142 @@ fn render_gl(gl: &glow::Context, info: &egui::PaintCallbackInfo, st: &mut Viewpo
 
         match settings.view_mode {
             ViewMode::PrintPlate => {
+                struct PlateGpuItem<'a> {
+                    draws: Vec<(&'a MeshGpu, [f32; 3])>,
+                    bounds: ([f32; 3], [f32; 3]),
+                }
+                let mut items: Vec<PlateGpuItem<'_>> = Vec::new();
                 if window.is_door {
-                    type PlateGpuItem<'a> = (&'a MeshGpu, ([f32; 3], [f32; 3]), [f32; 3]);
-                    let mut items: Vec<PlateGpuItem<'_>> = Vec::new();
                     if let Some(m) = &pipeline.ext_gpu {
-                        items.push((m, window.exterior_half.bounds(), ext_color));
+                        items.push(PlateGpuItem {
+                            draws: vec![(m, ext_color)],
+                            bounds: window.exterior_half.bounds(),
+                        });
                     }
                     if let Some(m) = &pipeline.int_gpu {
-                        items.push((m, window.interior_half.bounds(), int_color));
+                        items.push(PlateGpuItem {
+                            draws: vec![(m, int_color)],
+                            bounds: window.interior_half.bounds(),
+                        });
                     }
                     for (idx, lg) in pipeline.leaf_gpus.iter().enumerate() {
-                        items.push((
-                            &lg.main_gpu,
-                            window.door_leaves[idx].mesh.bounds(),
-                            door_color,
-                        ));
+                        items.push(PlateGpuItem {
+                            draws: vec![(&lg.main_gpu, door_color)],
+                            bounds: window.door_leaves[idx].mesh.bounds(),
+                        });
                         if let (Some(em), Some(em_mesh)) =
                             (&lg.ext_gpu, &window.door_leaves[idx].exterior_leaf)
                         {
-                            items.push((em, em_mesh.bounds(), ext_color));
+                            items.push(PlateGpuItem {
+                                draws: vec![(em, door_color)],
+                                bounds: em_mesh.bounds(),
+                            });
                         }
                     }
-                    if let Some(hm) = &pipeline.handle_set_gpu {
-                        items.push((hm, window.door_handle.bounds(), brass_color));
-                    }
-
-                    let spacing = params.plate_spacing as f32;
-                    let total_w: f32 = items
-                        .iter()
-                        .map(|(_, (bmin, bmax), _)| (bmax[0] - bmin[0]).max(0.1))
-                        .sum::<f32>()
-                        + spacing * items.len().saturating_sub(1) as f32;
-                    let mut cursor_x = -total_w * 0.5;
-                    for (gpu, (bmin, bmax), col) in items {
-                        let w = (bmax[0] - bmin[0]).max(0.1);
-                        let cx = (bmin[0] + bmax[0]) * 0.5;
-                        let cy = (bmin[1] + bmax[1]) * 0.5;
-                        let m = Mat4::from_translation(Vec3::new(
-                            cursor_x + w * 0.5 - cx,
-                            -cy,
-                            -bmin[2],
-                        ));
-                        draw_gpu(gpu, m, col, 1.0, settings.show_wireframe, overhang_flag);
-                        cursor_x += w + spacing;
+                    if !pipeline.hardware_part_gpus.is_empty() {
+                        let hw_bounds: Vec<_> = window
+                            .hardware_parts
+                            .iter()
+                            .filter(|(_, m)| !m.triangles.is_empty())
+                            .map(|(_, m)| m.bounds())
+                            .collect();
+                        for (idx, (name, hm)) in pipeline.hardware_part_gpus.iter().enumerate() {
+                            if let Some(&b) = hw_bounds.get(idx) {
+                                let col = if name == "cat_flap" {
+                                    ext_color
+                                } else {
+                                    brass_color
+                                };
+                                items.push(PlateGpuItem {
+                                    draws: vec![(hm, col)],
+                                    bounds: b,
+                                });
+                            }
+                        }
+                    } else if let Some(hm) = &pipeline.handle_set_gpu {
+                        items.push(PlateGpuItem {
+                            draws: vec![(hm, brass_color)],
+                            bounds: window.door_handle.bounds(),
+                        });
                     }
                 } else {
-                    let ext_w = ext_max[0] - ext_min[0];
-                    let int_w = int_max[0] - int_min[0];
-                    let total_w = ext_w + int_w + params.plate_spacing as f32;
-                    let m_ext = Mat4::from_translation(Vec3::new(
-                        -total_w * 0.5 + ext_w * 0.5 - ext_cx,
-                        -ext_cy,
-                        0.0,
-                    ));
-                    let m_int = Mat4::from_translation(Vec3::new(
-                        total_w * 0.5 - int_w * 0.5 - int_cx,
-                        -int_cy,
-                        0.0,
-                    ));
-                    draw_part(
-                        &pipeline.ext_gpu,
-                        m_ext,
-                        ext_color,
-                        1.0,
-                        settings.show_wireframe,
-                        overhang_flag,
-                    );
                     let sash_color = [
                         (ext_color[0] * 0.90 + 0.08).min(1.0),
                         (ext_color[1] * 0.90 + 0.07).min(1.0),
                         (ext_color[2] * 0.90 + 0.04).min(1.0),
                     ];
-                    for sg in &pipeline.sash_gpus {
-                        draw_gpu(
-                            &sg.mesh_gpu,
-                            m_ext,
-                            sash_color,
-                            1.0,
-                            settings.show_wireframe,
-                            overhang_flag,
-                        );
+                    if let Some(m) = &pipeline.ext_gpu {
+                        let mut draws = vec![(m, ext_color)];
+                        for sg in &pipeline.sash_gpus {
+                            draws.push((&sg.mesh_gpu, sash_color));
+                        }
+                        items.push(PlateGpuItem {
+                            draws,
+                            bounds: window.printable_exterior_assembly().bounds(),
+                        });
                     }
-                    draw_part(
-                        &pipeline.int_gpu,
-                        m_int,
-                        int_color,
-                        1.0,
-                        settings.show_wireframe,
-                        overhang_flag,
+                    if let Some(m) = &pipeline.int_gpu {
+                        items.push(PlateGpuItem {
+                            draws: vec![(m, int_color)],
+                            bounds: window.interior_half.bounds(),
+                        });
+                    }
+                }
+
+                let (bed_w, bed_h) = settings.bed_dimensions_mm;
+                let sizes: Vec<(f32, f32)> = items
+                    .iter()
+                    .map(|it| {
+                        (
+                            (it.bounds.1[0] - it.bounds.0[0]).max(0.1),
+                            (it.bounds.1[1] - it.bounds.0[1]).max(0.1),
+                        )
+                    })
+                    .collect();
+                let layout = dh_geometry::pack_part_bounds_onto_beds(
+                    &sizes,
+                    bed_w,
+                    bed_h,
+                    params.plate_spacing as f32,
+                );
+
+                // Draw print bed outlines (`[bed_w x bed_h]` per plate)
+                gl.use_program(Some(pipeline.line_program));
+                gl.uniform_3_f32(pipeline.u_line_color.as_ref(), 0.28, 0.56, 0.85);
+                gl.bind_vertex_array(Some(pipeline.bed_outline_vao));
+                for plate_idx in 0..layout.plate_count.max(1) {
+                    let plate_shift_x = plate_idx as f32 * (bed_w + 20.0);
+                    let bed_model = Mat4::from_translation(Vec3::new(plate_shift_x, 0.0, 0.0))
+                        * Mat4::from_scale(Vec3::new(bed_w, bed_h, 1.0));
+                    let bed_mvp = vp_mat * bed_model;
+                    gl.uniform_matrix_4_f32_slice(
+                        pipeline.u_line_mvp.as_ref(),
+                        false,
+                        bed_mvp.as_ref(),
                     );
+                    gl.draw_arrays(glow::LINES, 0, 8);
+                }
+
+                for pl in layout.placements {
+                    let item = &items[pl.part_index];
+                    let (bmin, bmax) = item.bounds;
+                    let plate_shift_x = pl.plate_index as f32 * (bed_w + 20.0);
+                    let m = if pl.rotated_90 {
+                        Mat4::from_translation(Vec3::new(
+                            plate_shift_x + pl.target_min_x + bmax[1],
+                            pl.target_min_y - bmin[0],
+                            -bmin[2],
+                        )) * Mat4::from_rotation_z(FRAC_PI_2)
+                    } else {
+                        Mat4::from_translation(Vec3::new(
+                            plate_shift_x + pl.target_min_x - bmin[0],
+                            pl.target_min_y - bmin[1],
+                            -bmin[2],
+                        ))
+                    };
+                    for &(gpu, col) in &item.draws {
+                        draw_gpu(gpu, m, col, 1.0, settings.show_wireframe, overhang_flag);
+                    }
                 }
             }
             ViewMode::ExteriorOnly => {
@@ -645,10 +697,19 @@ fn render_gl(gl: &glow::Context, info: &egui::PaintCallbackInfo, st: &mut Viewpo
                             ))
                             * flip_y;
 
+                        let main_col = if is_exploded && lg.ext_gpu.is_some() {
+                            [
+                                (door_color[0] * 0.92 + 0.05).min(1.0),
+                                (door_color[1] * 0.92 + 0.05).min(1.0),
+                                (door_color[2] * 0.92 + 0.05).min(1.0),
+                            ]
+                        } else {
+                            door_color
+                        };
                         draw_gpu(
                             &lg.main_gpu,
                             leaf_base,
-                            door_color,
+                            main_col,
                             1.0,
                             settings.show_wireframe,
                             0,
@@ -666,7 +727,7 @@ fn render_gl(gl: &glow::Context, info: &egui::PaintCallbackInfo, st: &mut Viewpo
                             draw_gpu(
                                 ext_leaf,
                                 m_ext_leaf,
-                                ext_color,
+                                door_color,
                                 1.0,
                                 settings.show_wireframe,
                                 0,
@@ -1075,7 +1136,14 @@ fn render_project_wall_gl(
                                 0.0,
                                 z_leaf_int - meta.leaf_thickness,
                             ));
-                        draw_gpu(ext_l, m_ext_l, ext_col, 1.0, settings.show_wireframe, false);
+                        draw_gpu(
+                            ext_l,
+                            m_ext_l,
+                            door_col,
+                            1.0,
+                            settings.show_wireframe,
+                            false,
+                        );
                     }
                     let hw_model = place_at
                         * swing
@@ -1310,6 +1378,7 @@ impl GlPipeline {
         let u_line_color = unsafe { gl.get_uniform_location(line_program, "u_color") };
 
         let (grid_vao, grid_vbo, grid_vertex_count) = unsafe { build_grid_buffers(gl) };
+        let (bed_outline_vao, bed_outline_vbo) = unsafe { build_bed_outline_buffers(gl) };
 
         Self {
             mesh_program,
@@ -1334,6 +1403,7 @@ impl GlPipeline {
             leaf_gpus: Vec::new(),
             sash_gpus: Vec::new(),
             handle_set_gpu: None,
+            hardware_part_gpus: Vec::new(),
             project_wall_gpu: None,
             project_openings_gpu: Vec::new(),
             uploaded_wall_version: 0,
@@ -1342,6 +1412,8 @@ impl GlPipeline {
             grid_vao,
             grid_vbo,
             grid_vertex_count,
+            bed_outline_vao,
+            bed_outline_vbo,
             uploaded_version: 0,
         }
     }
@@ -1467,6 +1539,16 @@ impl GlPipeline {
             replace_mesh_gpu(gl, &mut self.ac_gpu, &w.acetate_sheet);
             replace_mesh_gpu(gl, &mut self.wall_gpu, &w.wall_cutaway);
             replace_mesh_gpu(gl, &mut self.handle_set_gpu, &w.door_handle);
+            for (_, hm) in self.hardware_part_gpus.drain(..) {
+                gl.delete_vertex_array(hm.vao);
+                gl.delete_buffer(hm.vbo);
+            }
+            for (name, hw_mesh) in &w.hardware_parts {
+                if !hw_mesh.triangles.is_empty() {
+                    self.hardware_part_gpus
+                        .push((name.clone(), upload_tri_mesh(gl, hw_mesh)));
+                }
+            }
 
             for lg in self.leaf_gpus.drain(..) {
                 gl.delete_vertex_array(lg.main_gpu.vao);
@@ -1569,11 +1651,17 @@ impl GlPipeline {
                     gl.delete_buffer(m.vbo);
                 }
             }
+            for (_, hm) in self.hardware_part_gpus {
+                gl.delete_vertex_array(hm.vao);
+                gl.delete_buffer(hm.vbo);
+            }
             if let Some(t) = self.wall_photo_tex {
                 gl.delete_texture(t);
             }
             gl.delete_vertex_array(self.grid_vao);
             gl.delete_buffer(self.grid_vbo);
+            gl.delete_vertex_array(self.bed_outline_vao);
+            gl.delete_buffer(self.bed_outline_vbo);
             gl.delete_program(self.mesh_program);
             gl.delete_program(self.line_program);
         }
@@ -1657,6 +1745,28 @@ unsafe fn build_grid_buffers(gl: &glow::Context) -> (glow::VertexArray, glow::Bu
         gl.vertex_attrib_pointer_f32(0, 3, glow::FLOAT, false, 3 * 4, 0);
         gl.bind_vertex_array(None);
         (vao, vbo, vertex_count)
+    }
+}
+
+unsafe fn build_bed_outline_buffers(gl: &glow::Context) -> (glow::VertexArray, glow::Buffer) {
+    #[rustfmt::skip]
+    let verts: [f32; 24] = [
+        -0.5, -0.5, -0.02,  0.5, -0.5, -0.02,
+         0.5, -0.5, -0.02,  0.5,  0.5, -0.02,
+         0.5,  0.5, -0.02, -0.5,  0.5, -0.02,
+        -0.5,  0.5, -0.02, -0.5, -0.5, -0.02,
+    ];
+    let bytes = floats_to_bytes(&verts);
+    unsafe {
+        let vao = gl.create_vertex_array().unwrap();
+        let vbo = gl.create_buffer().unwrap();
+        gl.bind_vertex_array(Some(vao));
+        gl.bind_buffer(glow::ARRAY_BUFFER, Some(vbo));
+        gl.buffer_data_u8_slice(glow::ARRAY_BUFFER, &bytes, glow::STATIC_DRAW);
+        gl.enable_vertex_attrib_array(0);
+        gl.vertex_attrib_pointer_f32(0, 3, glow::FLOAT, false, 3 * 4, 0);
+        gl.bind_vertex_array(None);
+        (vao, vbo)
     }
 }
 

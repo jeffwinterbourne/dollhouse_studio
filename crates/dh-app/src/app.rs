@@ -10,7 +10,7 @@ use crate::inspector::{
     draw_wall_inspector,
 };
 use crate::photo_cache::WallPhotoTextureCache;
-use crate::ribbon::{ActiveViewport, RibbonAction, RibbonState, draw_top_ribbon};
+use crate::ribbon::{ActiveViewport, RibbonAction, RibbonState, StlExportLayout, draw_top_ribbon};
 use crate::theme::{StudioPalette, apply_studio_theme};
 use crate::welcome::{WelcomeAction, WelcomeState, draw_welcome_hub};
 use crate::wizards::{
@@ -23,9 +23,11 @@ use dh_core::{
     TemplateScope, UndoHistory, WallOpening, WindowParams, WindowStyle, sanitize_filename,
 };
 use dh_export::{
-    BedSizePreset, PdfExportOptions, export_piece_pdf, export_project_booklet_pdf, export_wall_pdf,
-    export_wall_svg, export_window_svg, pack_project_onto_build_plates,
-    pack_wall_onto_build_plates, write_binary_stl,
+    BedSizePreset, PdfExportOptions, collect_piece_individual_stls,
+    collect_project_individual_stls, collect_wall_individual_stls, export_piece_pdf,
+    export_project_booklet_pdf, export_wall_pdf, export_wall_svg, export_window_svg,
+    pack_piece_onto_build_plates, pack_project_onto_build_plates_with_report,
+    pack_wall_onto_build_plates_with_report, write_binary_stl,
 };
 use dh_geometry::{GeneratedWindow, WallMeshCache, build_window};
 use dh_project::{
@@ -491,6 +493,7 @@ impl DollhouseStudioApp {
 
                 let mut st = self.viewport3d.lock().unwrap();
                 st.settings.dark_mode = dark;
+                st.settings.bed_dimensions_mm = self.ribbon_state.bed_preset.dimensions_mm();
                 st.project_wall_mode = self.viewport == ActiveViewport::Wall3D;
                 st.wall_selected_ids = self.selected_opening_ids.iter().cloned().collect();
                 st.hovered_opening_id = self.canvas2d.openings.hovered_opening_id.clone();
@@ -512,6 +515,7 @@ impl DollhouseStudioApp {
         } else {
             let mut st = self.viewport3d.lock().unwrap();
             st.settings.dark_mode = dark;
+            st.settings.bed_dimensions_mm = self.ribbon_state.bed_preset.dimensions_mm();
             st.project_wall_mode = false;
         }
 
@@ -1890,78 +1894,209 @@ impl DollhouseStudioApp {
                     self.project.manifest.display_unit,
                     PdfExportScope::ActivePiece,
                 ),
-                RibbonAction::ExportPieceStlPlate => self.export_piece_stl(0),
-                RibbonAction::ExportPieceStlExterior => self.export_piece_stl(1),
-                RibbonAction::ExportPieceStlInterior => self.export_piece_stl(2),
-                RibbonAction::PackWallPlatesStl(bed) => self.export_packed_plates(false, bed),
-                RibbonAction::PackProjectPlatesStl(bed) => self.export_packed_plates(true, bed),
+                RibbonAction::ExportPieceStl { bed, layout } => self.export_piece_stl(bed, layout),
+                RibbonAction::ExportWallStl { bed, layout } => {
+                    self.export_multi_stl(false, bed, layout)
+                }
+                RibbonAction::ExportProjectStl { bed, layout } => {
+                    self.export_multi_stl(true, bed, layout)
+                }
                 RibbonAction::ExportSvgCutSheet => self.export_svg_sheet(),
             }
         }
     }
 
-    fn export_piece_stl(&mut self, which: usize) {
-        let Some((_, params)) = self.current_selected_params_for_3d() else {
+    fn export_piece_stl(&mut self, bed: BedSizePreset, layout: StlExportLayout) {
+        let Some((piece_label, params)) = self.current_selected_params_for_3d() else {
             self.show_toast("No active window/door selected.", true);
             return;
         };
         let built = build_window(&params);
-        let (mesh, suffix, lbl) = match which {
-            1 => (built.printable_exterior_assembly(), "exterior", "Exterior"),
-            2 => (built.interior_half.clone(), "interior", "Interior"),
-            _ => (built.print_plate.clone(), "plate", "Print Plate"),
-        };
         let dir = self.default_export_subdir("stl");
-        let name = format!(
-            "{}_{suffix}.stl",
-            sanitize_filename(&self.project.manifest.name)
-        );
-        if let Some(path) = rfd::FileDialog::new()
-            .set_directory(&dir)
-            .set_file_name(&name)
-            .add_filter("STL Mesh", &["stl"])
-            .save_file()
-        {
-            match write_binary_stl(&mesh, &path, lbl) {
-                Ok(()) => self.show_toast(format!("Exported STL: {}", path.display()), false),
-                Err(e) => self.show_toast(format!("STL export failed: {e}"), true),
+
+        match layout {
+            StlExportLayout::OneFilePerPart => {
+                let parts = collect_piece_individual_stls(&piece_label, &built);
+                if parts.is_empty() {
+                    self.show_toast("No printable parts generated for this piece.", true);
+                    return;
+                }
+                let Some(out_dir) = rfd::FileDialog::new()
+                    .set_title("Choose Folder for Individual Part STL Files (1 per part)")
+                    .set_directory(&dir)
+                    .pick_folder()
+                else {
+                    return;
+                };
+                for (stem, mesh) in &parts {
+                    let p = out_dir.join(format!("{stem}.stl"));
+                    if let Err(e) = write_binary_stl(mesh, &p, stem) {
+                        self.show_toast(format!("STL export failed ({stem}): {e}"), true);
+                        return;
+                    }
+                }
+                self.show_toast(
+                    format!(
+                        "Exported {} individual part STLs to {}",
+                        parts.len(),
+                        out_dir.display()
+                    ),
+                    false,
+                );
+            }
+            StlExportLayout::CombinedPlate => {
+                let (bw, bh) = bed.dimensions_mm();
+                let report =
+                    pack_piece_onto_build_plates(&built, bw, bh, params.plate_spacing as f32);
+                if report.plates.is_empty() {
+                    self.show_toast("No printable parts generated for this piece.", true);
+                    return;
+                }
+                let default_name = format!("{}_plate.stl", sanitize_filename(&piece_label));
+                let Some(path) = rfd::FileDialog::new()
+                    .set_title("Export Combined Print Plate STL")
+                    .set_directory(&dir)
+                    .set_file_name(&default_name)
+                    .add_filter("STL Mesh", &["stl"])
+                    .save_file()
+                else {
+                    return;
+                };
+
+                let warn = if report.oversized_parts.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        " (Note: {} exceeds {} bed: {})",
+                        report.oversized_parts.len(),
+                        bed.short_label(),
+                        report.oversized_parts.join(", ")
+                    )
+                };
+
+                if report.plates.len() == 1 {
+                    match write_binary_stl(&report.plates[0], &path, "Print Plate") {
+                        Ok(()) => self
+                            .show_toast(format!("Exported STL: {}{warn}", path.display()), false),
+                        Err(e) => self.show_toast(format!("STL export failed: {e}"), true),
+                    }
+                } else {
+                    let parent = path.parent().unwrap_or(&dir);
+                    let stem = path.file_stem().and_then(|s| s.to_str()).unwrap_or("plate");
+                    for (idx, plate) in report.plates.iter().enumerate() {
+                        let p = parent.join(format!("{stem}_part_{}.stl", idx + 1));
+                        if let Err(e) = write_binary_stl(plate, &p, &format!("Plate {}", idx + 1)) {
+                            self.show_toast(format!("Failed writing plate {}: {e}", idx + 1), true);
+                            return;
+                        }
+                    }
+                    self.show_toast(
+                        format!(
+                            "Split across {} bed-fitted plate STLs ({}) in {}{warn}",
+                            report.plates.len(),
+                            bed.short_label(),
+                            parent.display(),
+                        ),
+                        false,
+                    );
+                }
             }
         }
     }
 
-    fn export_packed_plates(&mut self, whole_project: bool, bed: BedSizePreset) {
-        let (bw, bh) = bed.dimensions_mm();
-        let plates = if whole_project {
-            pack_project_onto_build_plates(&self.project, bw, bh, 5.0)
-        } else if let Some(wall) = self.project.active_wall() {
-            pack_wall_onto_build_plates(wall, &self.project.components, bw, bh, 5.0)
-        } else {
-            Vec::new()
-        };
-        if plates.is_empty() {
-            self.show_toast("Nothing to pack into build plates.", true);
-            return;
-        }
-        let dir = self.default_export_subdir("plates");
-        let Some(base_dir) = rfd::FileDialog::new()
-            .set_title("Choose Output Folder for Packed Build Plate STLs")
-            .set_directory(&dir)
-            .pick_folder()
-        else {
-            return;
-        };
-        let prefix = sanitize_filename(&self.project.manifest.name);
-        for (idx, plate) in plates.iter().enumerate() {
-            let p = base_dir.join(format!("{prefix}_plate_{}.stl", idx + 1));
-            if let Err(e) = write_binary_stl(plate, &p, &format!("Plate {}", idx + 1)) {
-                self.show_toast(format!("Failed writing plate {}: {e}", idx + 1), true);
-                return;
+    fn export_multi_stl(
+        &mut self,
+        whole_project: bool,
+        bed: BedSizePreset,
+        layout: StlExportLayout,
+    ) {
+        match layout {
+            StlExportLayout::OneFilePerPart => {
+                let parts = if whole_project {
+                    collect_project_individual_stls(&self.project)
+                } else if let Some(wall) = self.project.active_wall() {
+                    collect_wall_individual_stls(wall, &self.project.components)
+                } else {
+                    Vec::new()
+                };
+                if parts.is_empty() {
+                    self.show_toast("Nothing to export.", true);
+                    return;
+                }
+                let dir = self.default_export_subdir("stl_parts");
+                let Some(base_dir) = rfd::FileDialog::new()
+                    .set_title("Choose Output Folder for Individual Part STLs (1 per part)")
+                    .set_directory(&dir)
+                    .pick_folder()
+                else {
+                    return;
+                };
+                for (stem, mesh) in &parts {
+                    let p = base_dir.join(format!("{stem}.stl"));
+                    if let Err(e) = write_binary_stl(mesh, &p, stem) {
+                        self.show_toast(format!("Failed writing {stem}.stl: {e}"), true);
+                        return;
+                    }
+                }
+                self.show_toast(
+                    format!("Exported {} individual part STLs", parts.len()),
+                    false,
+                );
+            }
+            StlExportLayout::CombinedPlate => {
+                let (bw, bh) = bed.dimensions_mm();
+                let report = if whole_project {
+                    pack_project_onto_build_plates_with_report(&self.project, bw, bh, 5.0)
+                } else if let Some(wall) = self.project.active_wall() {
+                    pack_wall_onto_build_plates_with_report(
+                        wall,
+                        &self.project.components,
+                        bw,
+                        bh,
+                        5.0,
+                    )
+                } else {
+                    Default::default()
+                };
+                if report.plates.is_empty() {
+                    self.show_toast("Nothing to pack into build plates.", true);
+                    return;
+                }
+                let dir = self.default_export_subdir("plates");
+                let Some(base_dir) = rfd::FileDialog::new()
+                    .set_title("Choose Output Folder for Packed Build Plate STLs")
+                    .set_directory(&dir)
+                    .pick_folder()
+                else {
+                    return;
+                };
+                let prefix = sanitize_filename(&self.project.manifest.name);
+                for (idx, plate) in report.plates.iter().enumerate() {
+                    let p = base_dir.join(format!("{prefix}_plate_{}.stl", idx + 1));
+                    if let Err(e) = write_binary_stl(plate, &p, &format!("Plate {}", idx + 1)) {
+                        self.show_toast(format!("Failed writing plate {}: {e}", idx + 1), true);
+                        return;
+                    }
+                }
+                let warn = if report.oversized_parts.is_empty() {
+                    String::new()
+                } else {
+                    format!(
+                        " (Oversized for {}: {})",
+                        bed.short_label(),
+                        report.oversized_parts.join(", ")
+                    )
+                };
+                self.show_toast(
+                    format!(
+                        "Exported {} packed build plate STL(s) ({}){warn}",
+                        report.plates.len(),
+                        bed.short_label()
+                    ),
+                    false,
+                );
             }
         }
-        self.show_toast(
-            format!("Exported {} packed build plate STL(s)", plates.len()),
-            false,
-        );
     }
 
     fn export_svg_sheet(&mut self) {
@@ -2534,44 +2669,32 @@ fn apply_window_style_to_params(params: &mut WindowParams, style: WindowStyle) {
     }
 }
 
-fn quick_wall_hash(wall: &dh_core::ProjectWall, components: &[ComponentDef]) -> u64 {
+pub fn quick_wall_hash(wall: &dh_core::ProjectWall, components: &[ComponentDef]) -> u64 {
     #[inline]
     fn mix(h: &mut u64, v: u64) {
         *h ^= v;
         *h = h.wrapping_mul(0x100000001b3);
     }
+    #[inline]
+    fn mix_bytes(h: &mut u64, bytes: &[u8]) {
+        mix(h, bytes.len() as u64);
+        for &b in bytes {
+            mix(h, u64::from(b));
+        }
+    }
     let mut h: u64 = 0xcbf29ce484222325;
+    mix_bytes(&mut h, wall.id.as_bytes());
     mix(&mut h, wall.width.to_bits());
     mix(&mut h, wall.height.to_bits());
     mix(&mut h, wall.wall_thickness.to_bits());
     mix(&mut h, wall.acetate_thickness.to_bits());
     mix(&mut h, wall.openings.len() as u64);
     for op in &wall.openings {
+        mix_bytes(&mut h, op.id.as_bytes());
         mix(&mut h, op.x_from_left.to_bits());
         mix(&mut h, op.y_from_bottom.to_bits());
         let p = op.resolve_params(components);
-        mix(&mut h, p.style as u64);
-        mix(&mut h, p.opening_width.to_bits());
-        mix(&mut h, p.opening_height.to_bits());
-        mix(&mut h, p.wall_thickness.to_bits());
-        mix(&mut h, p.trim_width.to_bits());
-        mix(&mut h, p.trim_thickness.to_bits());
-        mix(&mut h, p.architrave_style as u64);
-        mix(&mut h, p.groove_style as u64);
-        mix(&mut h, p.shutter_style as u64);
-        mix(&mut h, p.header_style as u64);
-        mix(&mut h, p.flush_top_mode as u64);
-        mix(&mut h, u64::from(p.flush_bottom_sill));
-        mix(&mut h, u64::from(p.flush_left_jamb));
-        mix(&mut h, u64::from(p.flush_right_jamb));
-        mix(&mut h, u64::from(p.sill_enabled));
-        mix(&mut h, u64::from(p.flower_box_enabled));
-        mix(&mut h, u64::from(p.double_doors));
-        mix(&mut h, u64::from(p.hinge_right));
-        mix(&mut h, p.bars_x as u64);
-        mix(&mut h, p.bars_y as u64);
-        mix(&mut h, p.arch_spokes as u64);
-        mix(&mut h, p.window_opening_mode as u64);
+        mix(&mut h, p.content_hash());
     }
     h
 }

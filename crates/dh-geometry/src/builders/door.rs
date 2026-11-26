@@ -49,6 +49,8 @@ pub struct DoorBuildOutput {
     pub wall_cutaway: TriMesh,
     pub door_leaves: Vec<DoorLeafAsset>,
     pub door_handle: TriMesh,
+    /// Separate logically grouped printable hardware parts (e.g. handles, letterbox plates, cat flap).
+    pub hardware_parts: Vec<(String, TriMesh)>,
     pub acetate_cut_w: f64,
     pub acetate_cut_h: f64,
 }
@@ -477,6 +479,12 @@ pub fn build_door_assembly(
     }
 
     // 6. Build Separately Printable Door Handle + Escutcheon Backplate + Letterbox / Cat-Flap Set (flat on Z=0)
+    let hardware_parts = build_printable_hardware_parts(
+        params.door_handle_style,
+        if params.double_doors { 4 } else { 2 },
+        letterbox_w_for_print,
+        cat_flap_for_print,
+    );
     let door_handle = build_printable_hardware_set(
         params.door_handle_style,
         if params.double_doors { 4 } else { 2 },
@@ -490,6 +498,7 @@ pub fn build_door_assembly(
         wall_cutaway,
         door_leaves,
         door_handle,
+        hardware_parts,
         acetate_cut_w: ac_w_out,
         acetate_cut_h: ac_h_out,
     }
@@ -687,6 +696,31 @@ fn build_single_leaf(
 
     let assembled_hx = -handle_x;
 
+    // Obstacle bounding boxes in bed-local coordinates so decorative door panels adapt around
+    // letterbox plates, cat flap bezels, and door handle escutcheons without disappearing.
+    let gw = params.groove_width.clamp(0.55, 1.4);
+    let groove_clr = gw * 0.5 + 0.85;
+    let mut panel_obstacles: Vec<[f64; 4]> = Vec::new();
+    if let Some((lb_y, lb_w, lb_h)) = letterbox_placement {
+        let hw = (lb_w + 4.4) * 0.5 + groove_clr;
+        let hh = (lb_h + 3.6) * 0.5 + groove_clr;
+        panel_obstacles.push([-hw, lb_y - hh, hw, lb_y + hh]);
+    }
+    if let Some((cf_cy, cf_w, cf_h)) = cat_flap_placement {
+        let hw = (cf_w + 3.6) * 0.5 + groove_clr;
+        let hh = (cf_h + 3.6) * 0.5 + groove_clr;
+        panel_obstacles.push([-hw, cf_cy - hh, hw, cf_cy + hh]);
+    }
+    if params.door_handle_style != DoorHandleStyle::None {
+        let hw = 3.6 + groove_clr;
+        let hh = if params.door_handle_style == DoorHandleStyle::PullBar {
+            9.3 + groove_clr
+        } else {
+            6.2 + groove_clr
+        };
+        panel_obstacles.push([handle_x - hw, handle_y - hh, handle_x + hw, handle_y + hh]);
+    }
+
     if is_glazed {
         // Two-half glazed door leaf sandwiching cut-to-size acetate!
         let glass_w = (leaf_w - 2.0 * half_w_inset).max(6.0);
@@ -738,8 +772,10 @@ fn build_single_leaf(
         };
         let glass_with_bars = difference_shapes(&glass_shape, &bar_shapes);
 
-        let mut int_grooves: Vec<VGroove> = Vec::new();
-        if params.style == WindowStyle::DoorFanlightGeorgian {
+        let mut base_panel_rects: Vec<[f64; 4]> = Vec::new();
+        let fanlight_gw = gw.clamp(0.55, 1.15);
+        let fanlight_gd = fanlight_gw * 0.58;
+        if params.style == WindowStyle::DoorFanlightGeorgian || glass_y_bot > -leaf_h * 0.5 + 24.0 {
             let hinge_stile = (leaf_w * 0.16).clamp(4.5, 9.0);
             let latch_stile = (leaf_w * 0.22).clamp(11.0, 14.0);
             let (px0, px1) = if bed_hinge_right {
@@ -749,44 +785,65 @@ fn build_single_leaf(
             };
             let pw = px1 - px0;
             let pcx = (px0 + px1) * 0.5;
-            let gw = params.groove_width.clamp(0.55, 1.15);
-            let gd = gw * 0.58;
             let lower_span_top = glass_y_bot - 5.0;
             let lower_span_bot = -leaf_h * 0.5 + 5.5;
             let lower_span = lower_span_top - lower_span_bot;
-            if pw >= gw + 3.0 && lower_span >= gw * 2.0 + 10.0 {
-                let row_gap = (lower_span * 0.08).clamp(3.0, 6.0);
-                let row_h = (lower_span - row_gap) * 0.5;
-                let cy_top = lower_span_top - row_h * 0.5;
-                let cy_bot = lower_span_bot + row_h * 0.5;
+            if pw >= fanlight_gw + 3.0 && lower_span >= fanlight_gw + 6.0 {
+                let row_centers: Vec<(f64, f64)> = if lower_span >= fanlight_gw * 2.0 + 18.0 {
+                    let row_gap = (lower_span * 0.08).clamp(3.0, 6.0);
+                    let row_h = (lower_span - row_gap) * 0.5;
+                    vec![
+                        (lower_span_top - row_h * 0.5, row_h),
+                        (lower_span_bot + row_h * 0.5, row_h),
+                    ]
+                } else {
+                    vec![((lower_span_bot + lower_span_top) * 0.5, lower_span)]
+                };
                 if pw >= 20.0 {
                     let cgap = (pw * 0.14).clamp(3.0, 6.0);
                     let cw = (pw - cgap) * 0.5;
                     let cxl = pcx - cgap * 0.5 - cw * 0.5;
                     let cxr = pcx + cgap * 0.5 + cw * 0.5;
-                    for cy in [cy_top, cy_bot] {
-                        int_grooves.push(VGroove {
-                            centerline: rect_centered(cxl, cy, cw, row_h),
-                            width: gw,
-                            depth: gd,
-                        });
-                        int_grooves.push(VGroove {
-                            centerline: rect_centered(cxr, cy, cw, row_h),
-                            width: gw,
-                            depth: gd,
-                        });
+                    for (cy, row_h) in row_centers {
+                        base_panel_rects.push([
+                            cxl - cw * 0.5,
+                            cy - row_h * 0.5,
+                            cxl + cw * 0.5,
+                            cy + row_h * 0.5,
+                        ]);
+                        base_panel_rects.push([
+                            cxr - cw * 0.5,
+                            cy - row_h * 0.5,
+                            cxr + cw * 0.5,
+                            cy + row_h * 0.5,
+                        ]);
                     }
                 } else {
-                    for cy in [cy_top, cy_bot] {
-                        int_grooves.push(VGroove {
-                            centerline: rect_centered(pcx, cy, pw, row_h),
-                            width: gw,
-                            depth: gd,
-                        });
+                    for (cy, row_h) in row_centers {
+                        base_panel_rects.push([
+                            pcx - pw * 0.5,
+                            cy - row_h * 0.5,
+                            pcx + pw * 0.5,
+                            cy + row_h * 0.5,
+                        ]);
                     }
                 }
             }
         }
+
+        let adapted_panels = adapt_panel_rects_around_obstacles(
+            base_panel_rects,
+            &panel_obstacles,
+            (fanlight_gw + 2.8).max(4.2),
+        );
+        let adapted_grooves: Vec<VGroove> = adapted_panels
+            .iter()
+            .map(|r| VGroove {
+                centerline: rect_bounds(r[0], r[1], r[2], r[3]),
+                width: fanlight_gw,
+                depth: fanlight_gd,
+            })
+            .collect();
 
         // Acetate pocket around glazing opening
         let ac_margin = 1.8;
@@ -844,7 +901,7 @@ fn build_single_leaf(
             region: int_rim_region,
         });
 
-        let ext_grooves: Vec<VGroove> = int_grooves
+        let ext_grooves: Vec<VGroove> = adapted_grooves
             .iter()
             .map(|g| {
                 let mut c: Contour2D = g.centerline.iter().map(|p| [-p[0], p[1]]).collect();
@@ -856,6 +913,11 @@ fn build_single_leaf(
                 }
             })
             .collect();
+        let int_grooves = if params.door_interior_panels {
+            adapted_grooves
+        } else {
+            Vec::new()
+        };
         let pin_bevel = Some((0.50, 0.58));
         let int_mesh = extrude_slabs_with_moulding(
             &int_slabs,
@@ -870,6 +932,7 @@ fn build_single_leaf(
                     None
                 },
                 grooves: int_grooves,
+                top_grooves: Vec::new(),
             },
         );
 
@@ -911,6 +974,7 @@ fn build_single_leaf(
                     None
                 },
                 grooves: ext_grooves,
+                top_grooves: Vec::new(),
             },
         );
 
@@ -939,8 +1003,11 @@ fn build_single_leaf(
             accessory_preview,
         }
     } else {
-        // Solid panelled door leaf with V-grooved raised panels!
-        let mut grooves = Vec::new();
+        // Solid panelled door leaf:
+        // Printed interior-face down at Z=0 (`flip_y` in assembly maps Z=0 -> INTERIOR, Z=solid_t -> EXTERIOR).
+        // Exterior raised-panel V-grooves are cut downward into Z=solid_t (`top_grooves`), while
+        // optional interior panelling (`door_interior_panels`) is cut upward into Z=0 (`grooves`).
+        let solid_t = door_t.max(2.6);
         let hinge_stile = (leaf_w * 0.16).clamp(4.5, 9.0);
         let latch_stile = (leaf_w * 0.22).clamp(8.5, 13.0);
         let (panel_x0, panel_x1) = if bed_hinge_right {
@@ -950,13 +1017,13 @@ fn build_single_leaf(
         };
         let panel_w = (panel_x1 - panel_x0).max(4.0);
         let panel_cx = (panel_x0 + panel_x1) * 0.5;
-        let gw = params.groove_width.clamp(0.55, 1.4);
-        let gd = gw * 0.58;
+        let top_gd = (gw * 0.58).min((solid_t - 1.55 - 0.12).max(0.20));
+        let bot_gd = (gw * 0.58).min(0.85);
         let two_cols = panel_w >= 20.0;
 
+        let mut base_panel_rects: Vec<[f64; 4]> = Vec::new();
         match params.style {
             WindowStyle::DoorGeorgian6Panel => {
-                // 3 rows x (2 columns if wide enough, 1 column on narrow double-door leaves)
                 let rows = [
                     (leaf_h * 0.24, leaf_h * 0.21),
                     (-leaf_h * 0.04, leaf_h * 0.21),
@@ -969,44 +1036,62 @@ fn build_single_leaf(
                     let cx_r = panel_cx + col_gap * 0.5 + col_w * 0.5;
                     for (cy, rh) in rows {
                         if rh > 4.0 {
-                            grooves.push(VGroove {
-                                centerline: rect_centered(cx_l, cy, col_w, rh),
-                                width: gw,
-                                depth: gd,
-                            });
-                            grooves.push(VGroove {
-                                centerline: rect_centered(cx_r, cy, col_w, rh),
-                                width: gw,
-                                depth: gd,
-                            });
+                            base_panel_rects.push([
+                                cx_l - col_w * 0.5,
+                                cy - rh * 0.5,
+                                cx_l + col_w * 0.5,
+                                cy + rh * 0.5,
+                            ]);
+                            base_panel_rects.push([
+                                cx_r - col_w * 0.5,
+                                cy - rh * 0.5,
+                                cx_r + col_w * 0.5,
+                                cy + rh * 0.5,
+                            ]);
                         }
                     }
                 } else {
                     for (cy, rh) in rows {
                         if rh > 4.0 && panel_w > 4.0 {
-                            grooves.push(VGroove {
-                                centerline: rect_centered(panel_cx, cy, panel_w, rh),
-                                width: gw,
-                                depth: gd,
-                            });
+                            base_panel_rects.push([
+                                panel_cx - panel_w * 0.5,
+                                cy - rh * 0.5,
+                                panel_cx + panel_w * 0.5,
+                                cy + rh * 0.5,
+                            ]);
                         }
                     }
                 }
             }
             WindowStyle::DoorArchedHeritage => {
-                let top_h = (leaf_h * 0.34).max(8.0);
+                // Keep upper panel strictly inside the rectangular trunk below the arch spring line.
+                let arch_safe_top = if kind == ProfileKind::RoundArch {
+                    (y_pin_top - 1.5).min(leaf_h * 0.36)
+                } else {
+                    leaf_h * 0.36
+                };
+                let bot_y0 = -leaf_h * 0.42;
                 let bot_h = (leaf_h * 0.28).max(8.0);
+                let bot_y1 = (bot_y0 + bot_h).min(arch_safe_top - 12.0);
+                let top_y0 = (bot_y1 + 6.0).max(-leaf_h * 0.08);
+                let top_y1 = arch_safe_top;
                 if panel_w > 4.0 {
-                    grooves.push(VGroove {
-                        centerline: rect_centered(panel_cx, leaf_h * 0.08, panel_w, top_h),
-                        width: gw,
-                        depth: gd,
-                    });
-                    grooves.push(VGroove {
-                        centerline: rect_centered(panel_cx, -leaf_h * 0.28, panel_w, bot_h),
-                        width: gw,
-                        depth: gd,
-                    });
+                    if top_y1 - top_y0 >= 6.0 {
+                        base_panel_rects.push([
+                            panel_cx - panel_w * 0.5,
+                            top_y0,
+                            panel_cx + panel_w * 0.5,
+                            top_y1,
+                        ]);
+                    }
+                    if bot_y1 - bot_y0 >= 6.0 {
+                        base_panel_rects.push([
+                            panel_cx - panel_w * 0.5,
+                            bot_y0,
+                            panel_cx + panel_w * 0.5,
+                            bot_y1,
+                        ]);
+                    }
                 }
             }
             _ => {
@@ -1020,31 +1105,60 @@ fn build_single_leaf(
                     let cx_r = panel_cx + col_gap * 0.5 + col_w * 0.5;
                     for (cy, rh) in [(leaf_h * 0.21, upper_h), (-leaf_h * 0.21, lower_h)] {
                         if rh > 4.0 {
-                            grooves.push(VGroove {
-                                centerline: rect_centered(cx_l, cy, col_w, rh),
-                                width: gw,
-                                depth: gd,
-                            });
-                            grooves.push(VGroove {
-                                centerline: rect_centered(cx_r, cy, col_w, rh),
-                                width: gw,
-                                depth: gd,
-                            });
+                            base_panel_rects.push([
+                                cx_l - col_w * 0.5,
+                                cy - rh * 0.5,
+                                cx_l + col_w * 0.5,
+                                cy + rh * 0.5,
+                            ]);
+                            base_panel_rects.push([
+                                cx_r - col_w * 0.5,
+                                cy - rh * 0.5,
+                                cx_r + col_w * 0.5,
+                                cy + rh * 0.5,
+                            ]);
                         }
                     }
                 } else if panel_w > 4.0 {
                     for (cy, rh) in [(leaf_h * 0.21, upper_h), (-leaf_h * 0.21, lower_h)] {
                         if rh > 4.0 {
-                            grooves.push(VGroove {
-                                centerline: rect_centered(panel_cx, cy, panel_w, rh),
-                                width: gw,
-                                depth: gd,
-                            });
+                            base_panel_rects.push([
+                                panel_cx - panel_w * 0.5,
+                                cy - rh * 0.5,
+                                panel_cx + panel_w * 0.5,
+                                cy + rh * 0.5,
+                            ]);
                         }
                     }
                 }
             }
         }
+
+        let adapted_panels = adapt_panel_rects_around_obstacles(
+            base_panel_rects,
+            &panel_obstacles,
+            (gw + 2.8).max(4.2),
+        );
+        let ext_top_grooves: Vec<VGroove> = adapted_panels
+            .iter()
+            .map(|r| VGroove {
+                centerline: rect_bounds(r[0], r[1], r[2], r[3]),
+                width: gw,
+                depth: top_gd,
+            })
+            .collect();
+        let int_bot_grooves: Vec<VGroove> = if params.door_interior_panels {
+            adapted_panels
+                .iter()
+                .map(|r| VGroove {
+                    centerline: rect_bounds(r[0], r[1], r[2], r[3]),
+                    width: gw,
+                    depth: bot_gd,
+                })
+                .collect()
+        } else {
+            Vec::new()
+        };
 
         let base_region = difference_shapes(&body_with_pins, &handle_hole);
         let body_no_pins = difference_shapes(&shape_from_contour(leaf_body_contour), &handle_hole);
@@ -1056,7 +1170,7 @@ fn build_single_leaf(
             },
             Slab {
                 z0: 1.55,
-                z1: door_t.max(2.6),
+                z1: solid_t,
                 region: body_no_pins,
             },
         ];
@@ -1065,11 +1179,11 @@ fn build_single_leaf(
             &MouldingConfig {
                 outer_chamfer: Some((0.50, 0.58)),
                 hole_chamfer: None,
-                grooves,
+                grooves: int_bot_grooves,
+                top_grooves: ext_top_grooves,
             },
         );
 
-        let solid_t = door_t.max(2.6);
         let (hardware_preview, accessory_preview) = build_assembled_leaf_hardware(
             params.door_handle_style,
             solid_t,
@@ -1096,6 +1210,91 @@ fn build_single_leaf(
     }
 }
 
+/// Adapts decorative recessed door panel rectangles around cutouts/bezels (letterbox, cat flap, handle)
+/// so panelling remains intact above/below or beside additions instead of disappearing.
+fn adapt_panel_rects_around_obstacles(
+    mut panels: Vec<[f64; 4]>,
+    obstacles: &[[f64; 4]],
+    min_dim: f64,
+) -> Vec<[f64; 4]> {
+    let rect_area = |r: [f64; 4]| (r[2] - r[0]).max(0.0) * (r[3] - r[1]).max(0.0);
+    let valid = |r: [f64; 4]| (r[2] - r[0]) >= min_dim && (r[3] - r[1]) >= min_dim;
+
+    for &obs in obstacles {
+        let [ox0, oy0, ox1, oy1] = obs;
+        let mut next = Vec::with_capacity(panels.len() * 2);
+        for p in panels {
+            let [px0, py0, px1, py1] = p;
+            if px1 <= ox0 || px0 >= ox1 || py1 <= oy0 || py0 >= oy1 {
+                next.push(p);
+                continue;
+            }
+            let top = [px0, oy1.max(py0), px1, py1];
+            let bot = [px0, py0, px1, oy0.min(py1)];
+            let left = [px0, py0, ox0.min(px1), py1];
+            let right = [ox1.max(px0), py0, px1, py1];
+
+            let mut vert = Vec::new();
+            if valid(top) {
+                vert.push(top);
+            }
+            if valid(bot) {
+                vert.push(bot);
+            }
+            let mut horiz = Vec::new();
+            if valid(left) {
+                horiz.push(left);
+            }
+            if valid(right) {
+                horiz.push(right);
+            }
+
+            let vert_score: f64 = vert.iter().map(|&r| rect_area(r)).sum::<f64>() * 1.15;
+            let horiz_score: f64 = horiz.iter().map(|&r| rect_area(r)).sum();
+
+            if vert_score >= horiz_score && !vert.is_empty() {
+                next.extend(vert);
+            } else {
+                next.extend(horiz);
+            }
+        }
+        panels = next;
+    }
+
+    panels
+}
+
+/// Builds logically grouped printable door hardware parts (`door_handles`, `letterbox_plates`,
+/// `cat_flap`) flat on `Z = 0` with zero unprintable overhangs.
+pub fn build_printable_hardware_parts(
+    style: DoorHandleStyle,
+    handle_count: usize,
+    letterbox_w: Option<f64>,
+    cat_flap_dims: Option<(f64, f64)>,
+) -> Vec<(String, TriMesh)> {
+    let mut out = Vec::new();
+    if style != DoorHandleStyle::None {
+        let single = build_single_handle_and_plate_for_style(style);
+        let copies = vec![single; handle_count];
+        let arranged = arrange_meshes_along_x(&copies, 2.5);
+        if !arranged.triangles.is_empty() {
+            out.push(("door_handles".to_string(), arranged));
+        }
+    }
+    if let Some(lb_w) = letterbox_w {
+        let plate = build_printable_letterbox_plate(lb_w, 3.2);
+        let arranged = arrange_meshes_along_x(&[plate.clone(), plate], 2.5);
+        out.push(("letterbox_plates".to_string(), arranged));
+    }
+    if let Some((cf_w, cf_h)) = cat_flap_dims {
+        let bezel = build_printable_cat_flap_bezel(cf_w, cf_h);
+        let flap = build_printable_cat_flap_door(cf_w, cf_h);
+        let arranged = arrange_meshes_along_x(&[bezel.clone(), bezel, flap], 2.5);
+        out.push(("cat_flap".to_string(), arranged));
+    }
+    out
+}
+
 /// Builds printable door hardware (handles + backplates + letterbox plates + cat flap bezels/flap)
 /// flat on `Z = 0` with zero unprintable overhangs.
 pub fn build_printable_hardware_set(
@@ -1104,27 +1303,9 @@ pub fn build_printable_hardware_set(
     letterbox_w: Option<f64>,
     cat_flap_dims: Option<(f64, f64)>,
 ) -> TriMesh {
-    let mut parts: Vec<TriMesh> = Vec::new();
-    if style != DoorHandleStyle::None {
-        let single = build_single_handle_and_plate_for_style(style);
-        for _ in 0..handle_count {
-            parts.push(single.clone());
-        }
-    }
-    if let Some(lb_w) = letterbox_w {
-        let plate = build_printable_letterbox_plate(lb_w, 3.2);
-        parts.push(plate.clone());
-        parts.push(plate);
-    }
-    if let Some((cf_w, cf_h)) = cat_flap_dims {
-        let bezel = build_printable_cat_flap_bezel(cf_w, cf_h);
-        let flap = build_printable_cat_flap_door(cf_w, cf_h);
-        parts.push(bezel.clone());
-        parts.push(bezel);
-        parts.push(flap);
-    }
-
-    arrange_meshes_along_x(&parts, 3.0)
+    let grouped = build_printable_hardware_parts(style, handle_count, letterbox_w, cat_flap_dims);
+    let meshes: Vec<TriMesh> = grouped.into_iter().map(|(_, m)| m).collect();
+    arrange_meshes_along_x(&meshes, 3.0)
 }
 
 /// Backward-compatible helper returning one Modern Lever handle + backplate flat on `Z = 0`.
@@ -1179,6 +1360,7 @@ fn build_single_handle_and_plate_for_style(style: DoorHandleStyle) -> TriMesh {
                     outer_chamfer: Some((0.20, 0.24)),
                     hole_chamfer: None,
                     grooves: Vec::new(),
+                    top_grooves: Vec::new(),
                 },
             );
             let plate_outer = shape_from_contour(rect_centered(-5.8, 0.0, 3.8, 11.4));
@@ -1193,6 +1375,7 @@ fn build_single_handle_and_plate_for_style(style: DoorHandleStyle) -> TriMesh {
                     outer_chamfer: Some((0.24, 0.28)),
                     hole_chamfer: None,
                     grooves: Vec::new(),
+                    top_grooves: Vec::new(),
                 },
             );
             out.append(&lever_mesh);
@@ -1214,6 +1397,7 @@ fn build_single_handle_and_plate_for_style(style: DoorHandleStyle) -> TriMesh {
                     outer_chamfer: Some((0.20, 0.24)),
                     hole_chamfer: None,
                     grooves: Vec::new(),
+                    top_grooves: Vec::new(),
                 },
             );
             let plate_outer = union_contours(&[
@@ -1232,6 +1416,7 @@ fn build_single_handle_and_plate_for_style(style: DoorHandleStyle) -> TriMesh {
                     outer_chamfer: Some((0.22, 0.26)),
                     hole_chamfer: None,
                     grooves: Vec::new(),
+                    top_grooves: Vec::new(),
                 },
             );
             out.append(&lever_mesh);
@@ -1264,6 +1449,7 @@ fn build_single_handle_and_plate_for_style(style: DoorHandleStyle) -> TriMesh {
                     outer_chamfer: Some((0.36, 0.42)),
                     hole_chamfer: None,
                     grooves: Vec::new(),
+                    top_grooves: Vec::new(),
                 },
             );
             let rose_outer = shape_from_contour(circle_contour(-6.6, 0.0, 3.3, 24));
@@ -1278,6 +1464,7 @@ fn build_single_handle_and_plate_for_style(style: DoorHandleStyle) -> TriMesh {
                     outer_chamfer: Some((0.22, 0.26)),
                     hole_chamfer: None,
                     grooves: Vec::new(),
+                    top_grooves: Vec::new(),
                 },
             );
             out.append(&knob_mesh);
@@ -1299,6 +1486,7 @@ fn build_single_handle_and_plate_for_style(style: DoorHandleStyle) -> TriMesh {
                     outer_chamfer: Some((0.20, 0.24)),
                     hole_chamfer: None,
                     grooves: Vec::new(),
+                    top_grooves: Vec::new(),
                 },
             );
             let kite = vec![[-6.8, -4.8], [-4.2, 0.0], [-6.8, 4.8], [-9.4, 0.0]];
@@ -1313,6 +1501,7 @@ fn build_single_handle_and_plate_for_style(style: DoorHandleStyle) -> TriMesh {
                     outer_chamfer: Some((0.22, 0.26)),
                     hole_chamfer: None,
                     grooves: Vec::new(),
+                    top_grooves: Vec::new(),
                 },
             );
             out.append(&ring_mesh);
@@ -1334,6 +1523,7 @@ fn build_single_handle_and_plate_for_style(style: DoorHandleStyle) -> TriMesh {
                     outer_chamfer: Some((0.22, 0.26)),
                     hole_chamfer: None,
                     grooves: Vec::new(),
+                    top_grooves: Vec::new(),
                 },
             );
             let strip = shape_from_contour(rect_centered(-6.2, 0.0, 3.4, 17.5));
@@ -1351,6 +1541,7 @@ fn build_single_handle_and_plate_for_style(style: DoorHandleStyle) -> TriMesh {
                     outer_chamfer: Some((0.22, 0.26)),
                     hole_chamfer: None,
                     grooves: Vec::new(),
+                    top_grooves: Vec::new(),
                 },
             );
             out.append(&pull_mesh);
@@ -1373,6 +1564,7 @@ fn build_printable_letterbox_plate(lb_w: f64, lb_h: f64) -> TriMesh {
             outer_chamfer: Some((0.22, 0.26)),
             hole_chamfer: None,
             grooves: Vec::new(),
+            top_grooves: Vec::new(),
         },
     )
 }
@@ -1390,6 +1582,7 @@ fn build_printable_cat_flap_bezel(cf_w: f64, cf_h: f64) -> TriMesh {
             outer_chamfer: Some((0.24, 0.28)),
             hole_chamfer: None,
             grooves: Vec::new(),
+            top_grooves: Vec::new(),
         },
     )
 }
@@ -1411,6 +1604,7 @@ fn build_printable_cat_flap_door(cf_w: f64, cf_h: f64) -> TriMesh {
             outer_chamfer: Some((0.20, 0.24)),
             hole_chamfer: None,
             grooves: Vec::new(),
+            top_grooves: Vec::new(),
         },
     )
 }
@@ -1443,6 +1637,7 @@ fn build_assembled_leaf_hardware(
                 outer_chamfer: Some((0.20, 0.24)),
                 hole_chamfer: None,
                 grooves: Vec::new(),
+                top_grooves: Vec::new(),
             },
         );
         m_ext.translate(cx as f32, cy as f32, -(leaf_t + thick) as f32);
@@ -1458,6 +1653,7 @@ fn build_assembled_leaf_hardware(
                 outer_chamfer: Some((0.20, 0.24)),
                 hole_chamfer: None,
                 grooves: Vec::new(),
+                top_grooves: Vec::new(),
             },
         );
         m_int.rotate_y_around(PI32, 0.0, 0.0);
@@ -1480,6 +1676,7 @@ fn build_assembled_leaf_hardware(
                 outer_chamfer: Some((0.18, 0.22)),
                 hole_chamfer: None,
                 grooves: Vec::new(),
+                top_grooves: Vec::new(),
             },
         );
         int_m.translate(0.0, 0.0, -(w as f32) * 0.5);
@@ -1504,6 +1701,7 @@ fn build_assembled_leaf_hardware(
                 outer_chamfer: Some((0.18, 0.22)),
                 hole_chamfer: None,
                 grooves: Vec::new(),
+                top_grooves: Vec::new(),
             },
         );
         ext_m.translate(0.0, 0.0, -(w as f32) * 0.5);
@@ -1579,6 +1777,7 @@ fn build_assembled_leaf_hardware(
                         outer_chamfer: Some((0.36, 0.42)),
                         hole_chamfer: None,
                         grooves: Vec::new(),
+                        top_grooves: Vec::new(),
                     },
                 )
             };

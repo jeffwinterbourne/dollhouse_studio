@@ -262,6 +262,16 @@ pub fn draw_piece_inspector_body(
                         }
                     });
             });
+            if ui
+                .checkbox(&mut params.door_interior_panels, "Interior Panelling")
+                .on_hover_text(
+                    "Also carve decorative recessed panelling on the interior side of the door",
+                )
+                .changed()
+            {
+                res.live_changed = true;
+                res.immediate_commit_label = Some("Toggle interior door panelling");
+            }
         }
 
         ui.add_space(4.0);
@@ -524,12 +534,48 @@ pub fn draw_piece_inspector_body(
                     res.live_changed = true;
                     res.immediate_commit_label = Some("Toggle letterbox");
                 }
+                if params.letterbox_enabled
+                    && slider_ratio_pct(
+                        ui,
+                        pal,
+                        "Letterbox Height",
+                        &mut params.letterbox_height_ratio,
+                        0.22..=0.72,
+                    )
+                {
+                    res.live_changed = true;
+                    res.drag_commit_label = Some("Move letterbox height");
+                }
                 if ui
                     .checkbox(&mut params.cat_flap_enabled, "Pet / Cat Flap")
                     .changed()
                 {
                     res.live_changed = true;
                     res.immediate_commit_label = Some("Toggle cat flap");
+                }
+                if params.cat_flap_enabled {
+                    if slider_unit_mm(
+                        ui,
+                        pal,
+                        "Cat Flap Width",
+                        &mut params.cat_flap_width,
+                        8.0..=30.0,
+                        unit,
+                    ) {
+                        res.live_changed = true;
+                        res.drag_commit_label = Some("Resize cat flap width");
+                    }
+                    if slider_unit_mm(
+                        ui,
+                        pal,
+                        "Cat Flap Height",
+                        &mut params.cat_flap_height,
+                        8.0..=32.0,
+                        unit,
+                    ) {
+                        res.live_changed = true;
+                        res.drag_commit_label = Some("Resize cat flap height");
+                    }
                 }
             }
         });

@@ -1,7 +1,8 @@
 use dh_core::{ComponentDef, Project, ProjectKind, ProjectWall};
-use dh_geometry::{TriMesh, build_window};
+use dh_geometry::{GeneratedWindow, TriMesh, build_window, pack_part_bounds_onto_beds};
+use std::collections::HashMap;
 
-/// Standard 3D printer build plate size presets for auto-nested wall/project batch packing.
+/// Standard 3D printer build plate size presets for auto-nested batch packing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BedSizePreset {
     Mini180,
@@ -46,22 +47,103 @@ impl BedSizePreset {
     }
 }
 
-fn append_wall_parts(wall: &ProjectWall, components: &[ComponentDef], out: &mut Vec<TriMesh>) {
-    for op in &wall.openings {
-        let params = op.resolve_params(components);
-        let built = build_window(&params);
-        out.push(built.printable_exterior_assembly());
-        out.push(built.interior_half);
-        for leaf in built.door_leaves {
-            out.push(leaf.mesh);
-            if let Some(ext_leaf) = leaf.exterior_leaf {
-                out.push(ext_leaf);
-            }
-        }
-        if !built.door_handle.triangles.is_empty() {
-            out.push(built.door_handle);
+/// Output of multi-plate 2D build-plate bin packing.
+#[derive(Debug, Clone, Default)]
+pub struct PackedPlatesReport {
+    /// Combined watertight `TriMesh` plates (each centered at `(0, 0)` on `Z = 0`).
+    pub plates: Vec<TriMesh>,
+    /// Names of individual parts whose own footprint exceeded usable bed dimensions in both orientations.
+    pub oversized_parts: Vec<String>,
+}
+
+fn sanitize_stem(raw: &str) -> String {
+    let mut out = String::with_capacity(raw.len());
+    let mut prev_sep = true;
+    for ch in raw.chars() {
+        if ch.is_ascii_alphanumeric() {
+            out.push(ch.to_ascii_lowercase());
+            prev_sep = false;
+        } else if !prev_sep {
+            out.push('_');
+            prev_sep = true;
         }
     }
+    let trimmed = out.trim_matches('_').to_string();
+    if trimmed.is_empty() {
+        "part".to_string()
+    } else {
+        trimmed
+    }
+}
+
+fn append_named_window_parts(
+    prefix: &str,
+    built: &GeneratedWindow,
+    out: &mut Vec<(String, TriMesh)>,
+) {
+    let clean_prefix = sanitize_stem(prefix);
+    for (part_name, mesh) in built.named_printable_parts() {
+        if !mesh.triangles.is_empty() {
+            out.push((format!("{clean_prefix}_{part_name}"), mesh));
+        }
+    }
+}
+
+fn append_named_wall_parts(
+    wall: &ProjectWall,
+    wall_prefix: Option<&str>,
+    components: &[ComponentDef],
+    out: &mut Vec<(String, TriMesh)>,
+) {
+    for (idx, op) in wall.openings.iter().enumerate() {
+        let params = op.resolve_params(components);
+        let built = build_window(&params);
+        let op_clean = sanitize_stem(&op.name);
+        let prefix = match wall_prefix {
+            Some(wp) => format!("{wp}_{:02}_{op_clean}", idx + 1),
+            None => format!("{:02}_{op_clean}", idx + 1),
+        };
+        append_named_window_parts(&prefix, &built, out);
+    }
+}
+
+fn deduplicate_part_names(parts: Vec<(String, TriMesh)>) -> Vec<(String, TriMesh)> {
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    let mut out = Vec::with_capacity(parts.len());
+    for (stem, mesh) in parts {
+        let n = counts.entry(stem.clone()).or_insert(0);
+        *n += 1;
+        let final_name = if *n == 1 {
+            stem
+        } else {
+            format!("{stem}_{}", *n)
+        };
+        out.push((final_name, mesh));
+    }
+    out
+}
+
+/// Packs a single built piece onto one or more `(bed_w x bed_h)` plates on `Z = 0`.
+pub fn pack_piece_onto_build_plates(
+    window: &GeneratedWindow,
+    bed_w: f32,
+    bed_h: f32,
+    spacing: f32,
+) -> PackedPlatesReport {
+    pack_meshes_onto_beds_named(window.named_printable_parts(), bed_w, bed_h, spacing)
+}
+
+/// Packs every printable part from `wall` onto `(bed_w x bed_h)` build plates with oversized-part diagnostics.
+pub fn pack_wall_onto_build_plates_with_report(
+    wall: &ProjectWall,
+    components: &[ComponentDef],
+    bed_w: f32,
+    bed_h: f32,
+    spacing: f32,
+) -> PackedPlatesReport {
+    let mut parts = Vec::new();
+    append_named_wall_parts(wall, None, components, &mut parts);
+    pack_meshes_onto_beds_named(parts, bed_w, bed_h, spacing)
 }
 
 /// Packs every printable part from `wall` onto `(bed_w x bed_h)` build plates on `Z = 0`.
@@ -72,9 +154,34 @@ pub fn pack_wall_onto_build_plates(
     bed_h: f32,
     spacing: f32,
 ) -> Vec<TriMesh> {
+    pack_wall_onto_build_plates_with_report(wall, components, bed_w, bed_h, spacing).plates
+}
+
+/// Packs every printable part across an entire `Project` onto `(bed_w x bed_h)` build plates
+/// with oversized-part diagnostics.
+pub fn pack_project_onto_build_plates_with_report(
+    project: &Project,
+    bed_w: f32,
+    bed_h: f32,
+    spacing: f32,
+) -> PackedPlatesReport {
     let mut parts = Vec::new();
-    append_wall_parts(wall, components, &mut parts);
-    pack_meshes_onto_beds(parts, bed_w, bed_h, spacing)
+    match project.manifest.kind {
+        ProjectKind::SinglePiece => {
+            for (idx, piece) in project.pieces.iter().enumerate() {
+                let built = build_window(&piece.params);
+                let prefix = format!("{:02}_{}", idx + 1, sanitize_stem(&piece.name));
+                append_named_window_parts(&prefix, &built, &mut parts);
+            }
+        }
+        ProjectKind::MultiWall => {
+            for (w_idx, wall) in project.walls.iter().enumerate() {
+                let wp = format!("w{:02}_{}", w_idx + 1, sanitize_stem(&wall.name));
+                append_named_wall_parts(wall, Some(&wp), &project.components, &mut parts);
+            }
+        }
+    }
+    pack_meshes_onto_beds_named(parts, bed_w, bed_h, spacing)
 }
 
 /// Packs every printable part across an entire `Project` onto `(bed_w x bed_h)` build plates.
@@ -84,110 +191,97 @@ pub fn pack_project_onto_build_plates(
     bed_h: f32,
     spacing: f32,
 ) -> Vec<TriMesh> {
+    pack_project_onto_build_plates_with_report(project, bed_w, bed_h, spacing).plates
+}
+
+/// Collects individual named STLs (one file per printable part, centered on `Z = 0`) for a single piece.
+pub fn collect_piece_individual_stls(
+    piece_prefix: &str,
+    window: &GeneratedWindow,
+) -> Vec<(String, TriMesh)> {
+    let mut parts = Vec::new();
+    append_named_window_parts(piece_prefix, window, &mut parts);
+    deduplicate_part_names(parts)
+}
+
+/// Collects individual named STLs (one file per printable part, centered on `Z = 0`) for a wall.
+pub fn collect_wall_individual_stls(
+    wall: &ProjectWall,
+    components: &[ComponentDef],
+) -> Vec<(String, TriMesh)> {
+    let mut parts = Vec::new();
+    append_named_wall_parts(wall, None, components, &mut parts);
+    deduplicate_part_names(parts)
+}
+
+/// Collects individual named STLs (one file per printable part, centered on `Z = 0`) for an entire project.
+pub fn collect_project_individual_stls(project: &Project) -> Vec<(String, TriMesh)> {
     let mut parts = Vec::new();
     match project.manifest.kind {
         ProjectKind::SinglePiece => {
-            for piece in &project.pieces {
+            for (idx, piece) in project.pieces.iter().enumerate() {
                 let built = build_window(&piece.params);
-                parts.push(built.printable_exterior_assembly());
-                parts.push(built.interior_half);
-                for leaf in built.door_leaves {
-                    parts.push(leaf.mesh);
-                    if let Some(ext_leaf) = leaf.exterior_leaf {
-                        parts.push(ext_leaf);
-                    }
-                }
-                if !built.door_handle.triangles.is_empty() {
-                    parts.push(built.door_handle);
-                }
+                let prefix = format!("{:02}_{}", idx + 1, sanitize_stem(&piece.name));
+                append_named_window_parts(&prefix, &built, &mut parts);
             }
         }
         ProjectKind::MultiWall => {
-            for wall in &project.walls {
-                append_wall_parts(wall, &project.components, &mut parts);
+            for (w_idx, wall) in project.walls.iter().enumerate() {
+                let wp = format!("w{:02}_{}", w_idx + 1, sanitize_stem(&wall.name));
+                append_named_wall_parts(wall, Some(&wp), &project.components, &mut parts);
             }
         }
     }
-    pack_meshes_onto_beds(parts, bed_w, bed_h, spacing)
+    deduplicate_part_names(parts)
 }
 
-fn pack_meshes_onto_beds(
-    parts: Vec<TriMesh>,
+fn pack_meshes_onto_beds_named(
+    parts: Vec<(String, TriMesh)>,
     bed_w: f32,
     bed_h: f32,
     spacing: f32,
-) -> Vec<TriMesh> {
-    if parts.is_empty() {
-        return Vec::new();
+) -> PackedPlatesReport {
+    let non_empty: Vec<(String, TriMesh)> = parts
+        .into_iter()
+        .filter(|(_, m)| !m.triangles.is_empty())
+        .collect();
+    if non_empty.is_empty() {
+        return PackedPlatesReport::default();
     }
 
-    let usable_w = (bed_w - 10.0).max(40.0);
-    let usable_h = (bed_h - 10.0).max(40.0);
-    let gap = spacing.clamp(1.0, 30.0);
-
-    let mut sized_parts: Vec<(TriMesh, f32, f32)> = parts
-        .into_iter()
-        .filter(|m| !m.triangles.is_empty())
-        .map(|mut m| {
+    let sizes: Vec<(f32, f32)> = non_empty
+        .iter()
+        .map(|(_, m)| {
             let (bmin, bmax) = m.bounds();
-            let mut pw = (bmax[0] - bmin[0]).max(0.1);
-            let mut ph = (bmax[1] - bmin[1]).max(0.1);
-            if pw > usable_w && ph <= usable_w {
-                for p in &mut m.positions {
-                    let x = p[0];
-                    let y = p[1];
-                    p[0] = -y;
-                    p[1] = x;
-                }
-                let (rmin, rmax) = m.bounds();
-                pw = (rmax[0] - rmin[0]).max(0.1);
-                ph = (rmax[1] - rmin[1]).max(0.1);
-            }
-            (m, pw, ph)
+            ((bmax[0] - bmin[0]).max(0.1), (bmax[1] - bmin[1]).max(0.1))
         })
         .collect();
-    sized_parts.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
 
-    let mut plates: Vec<TriMesh> = Vec::new();
-    let mut current_plate = TriMesh::default();
-    let mut cursor_x = 0.0f32;
-    let mut shelf_y = 0.0f32;
-    let mut shelf_h = 0.0f32;
-
-    for (mut mesh, pw, ph) in sized_parts {
-        if cursor_x > 0.0 && cursor_x + pw > usable_w {
-            cursor_x = 0.0;
-            shelf_y += shelf_h + gap;
-            shelf_h = 0.0;
+    let layout = pack_part_bounds_onto_beds(&sizes, bed_w, bed_h, spacing);
+    let mut plates = vec![TriMesh::default(); layout.plate_count];
+    for pl in layout.placements {
+        let mut mesh = non_empty[pl.part_index].1.clone();
+        if pl.rotated_90 {
+            mesh.rotate_z_90_ccw();
         }
-        if shelf_y > 0.0 && shelf_y + ph > usable_h && !current_plate.triangles.is_empty() {
-            center_plate_on_bed(&mut current_plate);
-            plates.push(current_plate);
-            current_plate = TriMesh::default();
-            cursor_x = 0.0;
-            shelf_y = 0.0;
-            shelf_h = 0.0;
-        }
-
-        let (bmin, _bmax) = mesh.bounds();
-        mesh.translate(cursor_x - bmin[0], shelf_y - bmin[1], -bmin[2]);
-        current_plate.append(&mesh);
-
-        cursor_x += pw + gap;
-        shelf_h = shelf_h.max(ph);
+        let (bmin, _) = mesh.bounds();
+        mesh.translate(
+            pl.target_min_x - bmin[0],
+            pl.target_min_y - bmin[1],
+            -bmin[2],
+        );
+        plates[pl.plate_index].append(&mesh);
     }
+    plates.retain(|p| !p.triangles.is_empty());
 
-    if !current_plate.triangles.is_empty() {
-        center_plate_on_bed(&mut current_plate);
-        plates.push(current_plate);
+    let oversized_parts = layout
+        .oversized_indices
+        .into_iter()
+        .map(|i| non_empty[i].0.clone())
+        .collect();
+
+    PackedPlatesReport {
+        plates,
+        oversized_parts,
     }
-
-    plates
-}
-
-fn center_plate_on_bed(plate: &mut TriMesh) {
-    let (bmin, bmax) = plate.bounds();
-    let cx = (bmin[0] + bmax[0]) * 0.5;
-    let cy = (bmin[1] + bmax[1]) * 0.5;
-    plate.translate(-cx, -cy, -bmin[2]);
 }

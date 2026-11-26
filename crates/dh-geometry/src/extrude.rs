@@ -25,15 +25,17 @@ pub struct VGroove {
     pub depth: f64,
 }
 
-/// Decorative front-face (`z = 0`) moulding operations applied to the base slab.
+/// Decorative front-face (`z = 0`) and optional top-face (`z = max_z`) moulding operations applied to the slabs.
 #[derive(Debug, Clone, Default)]
 pub struct MouldingConfig {
     /// `(inset_w, bevel_h)` for the outer architrave/door perimeter.
     pub outer_chamfer: Option<(f64, f64)>,
     /// `(outset_w, bevel_h)` for inner glass pane holes (chamfering glazing bars & pane edges).
     pub hole_chamfer: Option<(f64, f64)>,
-    /// Closed V-grooves cut into the `z = 0` face.
+    /// Closed V-grooves cut upward into the `z = 0` face.
     pub grooves: Vec<VGroove>,
+    /// Closed V-grooves cut downward into the top horizontal cap (`last.z1`).
+    pub top_grooves: Vec<VGroove>,
 }
 
 /// Indexed watertight triangle mesh in millimeters (`Z` up).
@@ -92,6 +94,16 @@ impl TriMesh {
             let dz = p[2] - pivot_z;
             p[0] = pivot_x + dx * c + dz * s;
             p[2] = pivot_z - dx * s + dz * c;
+        }
+    }
+
+    /// Rotates 90 degrees counter-clockwise in the XY print bed plane `(x, y) -> (-y, x)`, preserving `z`.
+    pub fn rotate_z_90_ccw(&mut self) {
+        for p in &mut self.positions {
+            let x = p[0];
+            let y = p[1];
+            p[0] = -y;
+            p[1] = x;
         }
     }
 
@@ -283,6 +295,7 @@ pub fn extrude_slabs_with_base_chamfer(
             outer_chamfer: base_chamfer,
             hole_chamfer: None,
             grooves: Vec::new(),
+            top_grooves: Vec::new(),
         },
     )
 }
@@ -535,9 +548,78 @@ pub fn extrude_slabs_with_moulding(raw_slabs: &[Slab], moulding: &MouldingConfig
         emit_horizontal_cap(&mut mb, step, z, true);
     }
 
-    // Top cap at z_top (normal +Z)
+    // Top cap at z_top (normal +Z), with optional downward V-grooves cut into the top surface
     let last = slabs.last().unwrap();
-    emit_horizontal_cap(&mut mb, &last.region, last.z1, true);
+    if moulding.top_grooves.is_empty() {
+        emit_horizontal_cap(&mut mb, &last.region, last.z1, true);
+    } else {
+        let z_top = last.z1;
+        let top_slab_h = last.z1 - last.z0;
+        let mut top_shapes: Shapes2D = last.region.clone();
+
+        struct BuiltTopGroove {
+            centerline: Contour2D,
+            outer: Contour2D,
+            inner: Contour2D,
+            z_apex: f64,
+        }
+        let mut top_built: Vec<BuiltTopGroove> = Vec::new();
+        let mut top_bands: Shapes2D = Vec::new();
+
+        for g in &moulding.top_grooves {
+            if g.depth <= 0.05 || g.depth >= top_slab_h - 0.05 || g.width <= 0.15 {
+                continue;
+            }
+            if let (Some(go), Some(gi)) = (
+                miter_offset_contour(&g.centerline, -g.width * 0.5),
+                miter_offset_contour(&g.centerline, g.width * 0.5),
+            ) {
+                let mut rev_gi = gi.clone();
+                rev_gi.reverse();
+                let band = vec![go.clone(), rev_gi];
+                let band_shapes = vec![band.clone()];
+                let fits_inside = difference_shapes(&band_shapes, &top_shapes).is_empty();
+                let clear_of_prev = intersection_shapes(&band_shapes, &top_bands).is_empty();
+                if fits_inside && clear_of_prev {
+                    top_bands.push(band);
+                    top_built.push(BuiltTopGroove {
+                        centerline: g.centerline.clone(),
+                        outer: go,
+                        inner: gi,
+                        z_apex: z_top - g.depth,
+                    });
+                }
+            }
+        }
+
+        if !top_built.is_empty() {
+            top_shapes = difference_shapes(&top_shapes, &top_bands);
+            normalize_shapes_winding(&mut top_shapes);
+            let mut tpts: Vec<Pt2> = Vec::new();
+            for shape in &last.region {
+                for contour in shape {
+                    tpts.extend_from_slice(contour);
+                }
+            }
+            for bg in &top_built {
+                tpts.extend_from_slice(&bg.outer);
+                tpts.extend_from_slice(&bg.inner);
+            }
+            subdivide_shapes(&mut top_shapes, &tpts);
+            emit_horizontal_cap(&mut mb, &top_shapes, z_top, true);
+
+            for bg in &top_built {
+                let mut rev_outer = bg.outer.clone();
+                rev_outer.reverse();
+                let mut rev_mid = bg.centerline.clone();
+                rev_mid.reverse();
+                emit_tapered_wall(&mut mb, &rev_mid, &rev_outer, bg.z_apex, z_top);
+                emit_tapered_wall(&mut mb, &bg.centerline, &bg.inner, bg.z_apex, z_top);
+            }
+        } else {
+            emit_horizontal_cap(&mut mb, &last.region, z_top, true);
+        }
+    }
 
     mb.finish()
 }

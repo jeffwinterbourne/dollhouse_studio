@@ -9,7 +9,10 @@ pub use pdf::{
     write_project_booklet_pdf_bytes, write_wall_pdf_bytes,
 };
 pub use plate_packer::{
-    BedSizePreset, pack_project_onto_build_plates, pack_wall_onto_build_plates,
+    BedSizePreset, PackedPlatesReport, collect_piece_individual_stls,
+    collect_project_individual_stls, collect_wall_individual_stls, pack_piece_onto_build_plates,
+    pack_project_onto_build_plates, pack_project_onto_build_plates_with_report,
+    pack_wall_onto_build_plates, pack_wall_onto_build_plates_with_report,
 };
 pub use stl::{write_binary_stl, write_binary_stl_to_writer};
 pub use svg::{

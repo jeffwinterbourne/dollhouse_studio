@@ -1,8 +1,13 @@
-use dh_app::app::DollhouseStudioApp;
+use dh_app::app::{DollhouseStudioApp, quick_wall_hash};
 use dh_app::gallery::GalleryViewMode;
+use dh_app::ribbon::{ActiveViewport, RibbonTab, StlExportLayout};
 use dh_app::wizards::PhotoCalibrationLine;
 use dh_app::wizards::photo_wizard::compute_calibrated_size_mm;
-use dh_core::{DisplayUnit, Project, ScalePreset, WallPhotoConfig, WindowParams, WindowStyle};
+use dh_core::{
+    DisplayUnit, DoorHandleStyle, Project, ScalePreset, WallOpening, WallPhotoConfig, WindowParams,
+    WindowStyle,
+};
+use dh_geometry::WallMeshCache;
 use eframe::egui;
 
 fn run_frame(ctx: &egui::Context, app: &mut DollhouseStudioApp) {
@@ -230,4 +235,68 @@ fn side_panes_hide_show_browser_collapse_and_thick_acetate() {
     }
     .sanitized();
     assert!((thick.acetate_thickness - 8.0).abs() < 1e-6);
+}
+
+#[test]
+fn wall_3d_sync_rebuilds_when_door_hardware_or_panelling_changes() {
+    let ctx = egui::Context::default();
+    let mut proj = Project::new_multi_wall(
+        "Door Sync Test",
+        false,
+        ScalePreset::Scale1_12,
+        DisplayUnit::Mm,
+    );
+    let mut door_p = WindowParams::default();
+    WindowStyle::DoorGeorgian6Panel.apply_style_defaults(&mut door_p);
+    proj.walls[0]
+        .openings
+        .push(WallOpening::new_unique("Front Door", 120.0, 0.0, door_p));
+
+    let h0 = quick_wall_hash(&proj.walls[0], &proj.components);
+
+    if let dh_core::OpeningSource::Unique { ref mut params } = proj.walls[0].openings[0].source {
+        params.letterbox_enabled = true;
+    }
+    let h1 = quick_wall_hash(&proj.walls[0], &proj.components);
+    assert_ne!(h0, h1, "Wall hash must detect letterbox_enabled change");
+
+    if let dh_core::OpeningSource::Unique { ref mut params } = proj.walls[0].openings[0].source {
+        params.cat_flap_enabled = true;
+    }
+    let h2 = quick_wall_hash(&proj.walls[0], &proj.components);
+    assert_ne!(h1, h2, "Wall hash must detect cat_flap_enabled change");
+
+    if let dh_core::OpeningSource::Unique { ref mut params } = proj.walls[0].openings[0].source {
+        params.door_handle_style = DoorHandleStyle::RingLatch;
+    }
+    let h3 = quick_wall_hash(&proj.walls[0], &proj.components);
+    assert_ne!(h2, h3, "Wall hash must detect door_handle_style change");
+
+    if let dh_core::OpeningSource::Unique { ref mut params } = proj.walls[0].openings[0].source {
+        params.door_interior_panels = true;
+    }
+    let h4 = quick_wall_hash(&proj.walls[0], &proj.components);
+    assert_ne!(h3, h4, "Wall hash must detect door_interior_panels change");
+
+    let mut cache = WallMeshCache::default();
+    let built = cache.build_wall(&proj.walls[0], &proj.components);
+    let door_gen = &built.placed_openings[0].3;
+    assert!(
+        !door_gen.door_leaves[0]
+            .hardware_preview
+            .triangles
+            .is_empty()
+    );
+    assert!(
+        !door_gen.door_leaves[0]
+            .accessory_preview
+            .triangles
+            .is_empty()
+    );
+
+    let mut app = DollhouseStudioApp::new_headless_with_project(proj, None);
+    app.viewport = ActiveViewport::Wall3D;
+    app.ribbon_state.active_tab = RibbonTab::Export;
+    app.ribbon_state.stl_layout = StlExportLayout::OneFilePerPart;
+    run_frame(&ctx, &mut app);
 }

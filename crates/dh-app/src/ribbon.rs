@@ -74,10 +74,18 @@ pub enum DesignStyleFilter {
     Doors,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StlExportLayout {
+    #[default]
+    CombinedPlate,
+    OneFilePerPart,
+}
+
 pub struct RibbonState {
     pub active_tab: RibbonTab,
     pub style_filter: DesignStyleFilter,
     pub bed_preset: BedSizePreset,
+    pub stl_layout: StlExportLayout,
 }
 
 impl Default for RibbonState {
@@ -86,6 +94,7 @@ impl Default for RibbonState {
             active_tab: RibbonTab::Home,
             style_filter: DesignStyleFilter::All,
             bed_preset: BedSizePreset::Bambu256,
+            stl_layout: StlExportLayout::CombinedPlate,
         }
     }
 }
@@ -166,11 +175,18 @@ pub enum RibbonAction {
     ExportBookletPdf,
     ExportWallPdf,
     ExportPiecePdf,
-    ExportPieceStlPlate,
-    ExportPieceStlExterior,
-    ExportPieceStlInterior,
-    PackWallPlatesStl(BedSizePreset),
-    PackProjectPlatesStl(BedSizePreset),
+    ExportPieceStl {
+        bed: BedSizePreset,
+        layout: StlExportLayout,
+    },
+    ExportWallStl {
+        bed: BedSizePreset,
+        layout: StlExportLayout,
+    },
+    ExportProjectStl {
+        bed: BedSizePreset,
+        layout: StlExportLayout,
+    },
     ExportSvgCutSheet,
 }
 
@@ -1163,54 +1179,94 @@ pub fn draw_top_ribbon(
                     });
                     ui.separator();
                     ribbon_group(ui, pal, "3D Print STL", |ui| {
-                        if ribbon_tile(ui, pal, VectorIcon::ExportStl, "Piece Plate", false, true)
-                            .clicked()
-                        {
-                            actions.push(RibbonAction::ExportPieceStlPlate);
-                        }
-                        if ribbon_pill_btn(ui, pal, VectorIcon::ExportStl, "Ext STL", false, true)
-                            .clicked()
-                        {
-                            actions.push(RibbonAction::ExportPieceStlExterior);
-                        }
-                        if ribbon_pill_btn(ui, pal, VectorIcon::ExportStl, "Int STL", false, true)
-                            .clicked()
-                        {
-                            actions.push(RibbonAction::ExportPieceStlInterior);
-                        }
-                        egui::ComboBox::from_id_salt("ribbon_bed")
-                            .selected_text(state.bed_preset.short_label())
-                            .width(66.0)
-                            .show_ui(ui, |ui| {
-                                for bp in BedSizePreset::ALL {
-                                    ui.selectable_value(&mut state.bed_preset, bp, bp.label());
-                                }
-                            });
-                        if is_multi
-                            && ribbon_pill_btn(
-                                ui,
-                                pal,
-                                VectorIcon::PackPlates,
-                                "Pack Wall",
-                                false,
-                                true,
-                            )
-                            .clicked()
-                        {
-                            actions.push(RibbonAction::PackWallPlatesStl(state.bed_preset));
-                        }
-                        if ribbon_pill_btn(
+                        let per_part = state.stl_layout == StlExportLayout::OneFilePerPart;
+                        if ribbon_tile(
                             ui,
                             pal,
-                            VectorIcon::PackPlates,
-                            "Pack Project",
+                            VectorIcon::ExportStl,
+                            if per_part {
+                                "Piece Parts"
+                            } else {
+                                "Piece Plate"
+                            },
                             false,
                             true,
                         )
+                        .on_hover_text(if per_part {
+                            "Export 1 individual STL file per printable part of the selected piece"
+                        } else {
+                            "Export bed-fitted STL build plate(s) for the selected piece"
+                        })
                         .clicked()
                         {
-                            actions.push(RibbonAction::PackProjectPlatesStl(state.bed_preset));
+                            actions.push(RibbonAction::ExportPieceStl {
+                                bed: state.bed_preset,
+                                layout: state.stl_layout,
+                            });
                         }
+
+                        ui.vertical(|ui| {
+                            ui.horizontal(|ui| {
+                                egui::ComboBox::from_id_salt("ribbon_bed")
+                                    .selected_text(state.bed_preset.short_label())
+                                    .width(66.0)
+                                    .show_ui(ui, |ui| {
+                                        for bp in BedSizePreset::ALL {
+                                            ui.selectable_value(
+                                                &mut state.bed_preset,
+                                                bp,
+                                                bp.label(),
+                                            );
+                                        }
+                                    });
+                                segmented_pill(
+                                    ui,
+                                    pal,
+                                    &mut state.stl_layout,
+                                    &[
+                                        (StlExportLayout::CombinedPlate, "Combined"),
+                                        (StlExportLayout::OneFilePerPart, "1 STL / Part"),
+                                    ],
+                                );
+                            });
+                            ui.horizontal(|ui| {
+                                if is_multi
+                                    && ribbon_pill_btn(
+                                        ui,
+                                        pal,
+                                        VectorIcon::PackPlates,
+                                        if per_part { "Wall Parts" } else { "Wall Plates" },
+                                        false,
+                                        true,
+                                    )
+                                    .clicked()
+                                {
+                                    actions.push(RibbonAction::ExportWallStl {
+                                        bed: state.bed_preset,
+                                        layout: state.stl_layout,
+                                    });
+                                }
+                                if ribbon_pill_btn(
+                                    ui,
+                                    pal,
+                                    VectorIcon::PackPlates,
+                                    if per_part {
+                                        "Project Parts"
+                                    } else {
+                                        "Project Plates"
+                                    },
+                                    false,
+                                    true,
+                                )
+                                .clicked()
+                                {
+                                    actions.push(RibbonAction::ExportProjectStl {
+                                        bed: state.bed_preset,
+                                        layout: state.stl_layout,
+                                    });
+                                }
+                            });
+                        });
                     });
                     ui.separator();
                     ribbon_group(ui, pal, "CAD / Laser", |ui| {
