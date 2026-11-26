@@ -5,7 +5,7 @@ pub mod store;
 pub mod templates;
 
 pub use assets::{import_wall_photo, resolve_asset_path};
-pub use imaging::{DecodedPhoto, load_rgba_image, process_photo_rgba};
+pub use imaging::{DecodedPhoto, load_rgba_image, orient_photo_rgba, process_photo_rgba};
 pub use preferences::{
     AppPreferences, BedSizePref, PaperSizePref, PdfInstanceModePref, RecentProjectEntry, ThemeMode,
 };

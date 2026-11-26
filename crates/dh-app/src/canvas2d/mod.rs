@@ -3,7 +3,9 @@ pub mod openings;
 pub mod photo_layer;
 pub mod quick_bar;
 
-use crate::canvas2d::dimensions::{DimensionToolState, interact_and_draw_dimensions};
+use crate::canvas2d::dimensions::{
+    DimensionToolState, hit_test_dimension_pill, interact_and_draw_dimensions,
+};
 use crate::canvas2d::openings::{
     OpeningsInteraction, OpeningsInteractionState, interact_and_draw_openings, opening_screen_rect,
 };
@@ -15,9 +17,13 @@ use crate::canvas2d::photo_layer::{
 use crate::canvas2d::quick_bar::{QuickBarAction, draw_opening_quick_bar};
 use crate::photo_cache::WallPhotoTextureCache;
 use crate::theme::StudioPalette;
-use dh_core::{ComponentDef, DisplayUnit, PieceTemplate, ProjectWall, WindowStyle};
+use dh_core::{
+    ComponentDef, DimAnchor, DimOrientation, DisplayUnit, OpeningEdgeKind, PieceTemplate,
+    ProjectWall, WallDimension, WallEdgeKind, WindowStyle,
+};
 use eframe::egui::{
-    self, Align2, Color32, FontId, Pos2, Rect, RichText, Sense, Stroke, StrokeKind,
+    self, Align2, Color32, CornerRadius, FontId, Id, Margin, Order, Pos2, Rect, RichText, Sense,
+    Stroke, StrokeKind, Vec2,
 };
 
 #[derive(Debug, Clone)]
@@ -59,11 +65,31 @@ pub enum BlueprintAction {
         y_mm: f64,
     },
     QuickAction(QuickBarAction),
+    DriveDimension {
+        dim_id: String,
+        target_mm: f64,
+    },
+    ImportWallPhoto,
+    AutoDimensionWall,
+    SnapSelectedToFloor,
+    ToggleArchitraves(bool),
     OpenPhotoWizard,
     CommitUndo(&'static str),
 }
 
-#[derive(Default)]
+#[derive(Debug, Clone)]
+enum ContextTarget {
+    Dimension(String),
+    Opening(String),
+    Wall { x_mm: f64, y_mm: f64 },
+}
+
+#[derive(Debug, Clone)]
+struct BlueprintContextMenu {
+    screen_pos: Pos2,
+    target: ContextTarget,
+}
+
 pub struct Blueprint2DState {
     pub zoom_px_per_mm: f32,
     pub center_mm: [f64; 2],
@@ -71,10 +97,20 @@ pub struct Blueprint2DState {
     pub edit_photo_mode: bool,
     pub show_rulers: bool,
     pub show_grid: bool,
+    pub show_architrave_outlines: bool,
     pub photo: PhotoLayerState,
     pub dims: DimensionToolState,
     pub openings: OpeningsInteractionState,
     pan_start: Option<(Pos2, [f64; 2])>,
+    right_press_pos: Option<Pos2>,
+    context_menu: Option<BlueprintContextMenu>,
+    resize_wall_modal: Option<(f64, f64)>,
+}
+
+impl Default for Blueprint2DState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Blueprint2DState {
@@ -86,10 +122,14 @@ impl Blueprint2DState {
             edit_photo_mode: false,
             show_rulers: true,
             show_grid: true,
+            show_architrave_outlines: true,
             photo: PhotoLayerState::default(),
             dims: DimensionToolState::default(),
             openings: OpeningsInteractionState::default(),
             pan_start: None,
+            right_press_pos: None,
+            context_menu: None,
+            resize_wall_modal: None,
         }
     }
 
@@ -138,7 +178,9 @@ pub fn draw_blueprint_2d(
     let resp = ui.allocate_rect(full_rect, Sense::click_and_drag());
     let pointer_pos = ui.input(|i| i.pointer.hover_pos());
     let middle_down = ui.input(|i| i.pointer.middle_down());
+    let right_pressed = ui.input(|i| i.pointer.secondary_pressed());
     let right_down = ui.input(|i| i.pointer.secondary_down());
+    let right_released = ui.input(|i| i.pointer.secondary_released());
     let space_down = ui.input(|i| i.key_down(egui::Key::Space));
     let primary_down = ui.input(|i| i.pointer.primary_down());
 
@@ -162,8 +204,20 @@ pub fn draw_blueprint_2d(
         }
     }
 
-    // Pan with Middle button, Space+Drag, or Right-button drag outside dimension pills.
-    let pan_active = (middle_down || (space_down && primary_down) || right_down)
+    if right_pressed && canvas_hovered && pointer_pos.is_some_and(|p| canvas_rect.contains(p)) {
+        state.right_press_pos = pointer_pos;
+        state.context_menu = None;
+    }
+
+    let right_drag_pan = right_down
+        && pointer_pos.is_some_and(|p| {
+            state
+                .right_press_pos
+                .is_some_and(|sp| p.distance(sp) >= 5.0)
+        });
+
+    // Pan with Middle button, Space+Drag, or Right-button drag >= 5px (cleanly separates right-click!).
+    let pan_active = (middle_down || (space_down && primary_down) || right_drag_pan)
         && !state.photo.is_dragging()
         && !state.openings.is_dragging()
         && !state.dims.is_busy();
@@ -180,6 +234,36 @@ pub fn draw_blueprint_2d(
         }
     } else {
         state.pan_start = None;
+    }
+
+    // Open contextual right-click menu on clean right-click (<5px movement).
+    if right_released && let Some(start_p) = state.right_press_pos.take() {
+        let end_p = pointer_pos.unwrap_or(start_p);
+        if start_p.distance(end_p) < 5.0 && canvas_rect.contains(end_p) {
+            let target =
+                if let Some(did) = hit_test_dimension_pill(xform, wall, components, unit, end_p) {
+                    ContextTarget::Dimension(did)
+                } else if let Some(op) = wall.openings.iter().rev().find(|o| {
+                    opening_screen_rect(xform, o, components)
+                        .expand(3.0)
+                        .contains(end_p)
+                }) {
+                    if !selected_ids.contains(&op.id) {
+                        actions.push(BlueprintAction::SelectOpenings(vec![op.id.clone()]));
+                    }
+                    ContextTarget::Opening(op.id.clone())
+                } else {
+                    let mm = xform.screen_to_mm(end_p);
+                    ContextTarget::Wall {
+                        x_mm: mm[0],
+                        y_mm: mm[1],
+                    }
+                };
+            state.context_menu = Some(BlueprintContextMenu {
+                screen_pos: end_p,
+                target,
+            });
+        }
     }
 
     let painter = ui.painter_at(canvas_rect);
@@ -342,7 +426,9 @@ pub fn draw_blueprint_2d(
         consumed_by_photo = p_out.consumed_pointer;
     }
 
-    let dim_allow = !state.edit_photo_mode && !consumed_by_photo;
+    let modal_blocking = state.context_menu.is_some() || state.resize_wall_modal.is_some();
+
+    let dim_allow = !state.edit_photo_mode && !consumed_by_photo && !modal_blocking;
     let d_out = interact_and_draw_dimensions(
         ui,
         &painter,
@@ -350,17 +436,24 @@ pub fn draw_blueprint_2d(
         xform,
         wall,
         components,
+        selected_ids,
         unit,
         &mut state.dims,
         dim_allow,
         canvas_hovered,
     );
+    if let Some((dim_id, target_mm)) = d_out.drive_request {
+        actions.push(BlueprintAction::DriveDimension { dim_id, target_mm });
+    }
     if let Some(lbl) = d_out.commit_label {
         actions.push(BlueprintAction::CommitUndo(lbl));
     }
 
-    let allow_openings =
-        !state.edit_photo_mode && !state.dims.active_draw_mode && !d_out.consumed_pointer;
+    let allow_openings = !state.edit_photo_mode
+        && !state.dims.active_draw_mode
+        && !d_out.consumed_pointer
+        && !modal_blocking
+        && state.dims.editing_dim_id.is_none();
     let op_events = interact_and_draw_openings(
         ui,
         &painter,
@@ -370,6 +463,7 @@ pub fn draw_blueprint_2d(
         components,
         selected_ids,
         unit,
+        state.show_architrave_outlines,
         &mut state.openings,
         allow_openings,
         canvas_hovered,
@@ -461,8 +555,33 @@ pub fn draw_blueprint_2d(
         draw_rulers(ui, pal, full_rect, canvas_rect, xform, unit);
     }
 
-    // Bottom-right blueprint HUD badge ("Fit View", scale/zoom info, coordinate readout).
-    draw_bottom_right_hud(ui, pal, canvas_rect, xform, wall, unit, pointer_pos, state);
+    // Bottom-right blueprint HUD badge ("Architraves", "Fit View", coordinate readout).
+    draw_bottom_right_hud(
+        ui,
+        pal,
+        canvas_rect,
+        xform,
+        wall,
+        unit,
+        pointer_pos,
+        state,
+        &mut actions,
+    );
+
+    // Right-click contextual menu popup
+    draw_context_menu(
+        ui,
+        pal,
+        canvas_rect,
+        wall,
+        components,
+        unit,
+        state,
+        &mut actions,
+    );
+
+    // Inline wall resize modal triggered from right-click menu
+    draw_resize_wall_modal(ui, pal, canvas_rect, unit, state, &mut actions);
 
     let _ = resp;
     let _ = Color32::TRANSPARENT;
@@ -651,8 +770,12 @@ fn draw_bottom_right_hud(
     unit: DisplayUnit,
     pointer_pos: Option<Pos2>,
     state: &mut Blueprint2DState,
+    actions: &mut Vec<BlueprintAction>,
 ) {
-    let hud_pos = Pos2::new(canvas_rect.right() - 295.0, canvas_rect.bottom() - 36.0);
+    let hud_pos = Pos2::new(
+        (canvas_rect.right() - 395.0).max(canvas_rect.left() + 8.0),
+        canvas_rect.bottom() - 36.0,
+    );
     let area_id = ui.scope_id().with("blueprint_bottom_hud");
     egui::Area::new(area_id)
         .fixed_pos(hud_pos)
@@ -661,8 +784,8 @@ fn draw_bottom_right_hud(
             egui::Frame::NONE
                 .fill(pal.hud_glass)
                 .stroke(Stroke::new(1.0, pal.border))
-                .corner_radius(eframe::egui::CornerRadius::same(6))
-                .inner_margin(egui::Margin::symmetric(8, 4))
+                .corner_radius(CornerRadius::same(6))
+                .inner_margin(Margin::symmetric(8, 4))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
                         let cursor_str = if let Some(p) = pointer_pos {
@@ -680,10 +803,472 @@ fn draw_bottom_right_hud(
                             "X -  Y -".into()
                         };
                         ui.label(RichText::new(cursor_str).small().color(pal.text_secondary));
+                        let arch_btn =
+                            egui::Button::new(RichText::new("Architraves").small().color(
+                                if state.show_architrave_outlines {
+                                    pal.accent_text
+                                } else {
+                                    pal.text_primary
+                                },
+                            ))
+                            .fill(if state.show_architrave_outlines {
+                                pal.accent
+                            } else {
+                                pal.surface_card
+                            });
+                        if ui
+                            .add(arch_btn)
+                            .on_hover_text(
+                                "Toggle exterior trim / architrave & sill tolerance outlines",
+                            )
+                            .clicked()
+                        {
+                            state.show_architrave_outlines = !state.show_architrave_outlines;
+                            actions.push(BlueprintAction::ToggleArchitraves(
+                                state.show_architrave_outlines,
+                            ));
+                        }
                         if ui.small_button("Fit Wall").clicked() {
                             state.fit_wall(wall, canvas_rect);
                         }
                     });
                 });
         });
+}
+
+#[allow(clippy::too_many_arguments)]
+fn push_anchored_dim(
+    wall: &mut ProjectWall,
+    components: &[ComponentDef],
+    state: &mut Blueprint2DState,
+    a: DimAnchor,
+    b: DimAnchor,
+    orient: DimOrientation,
+    offset_mm: f64,
+    label: &str,
+) {
+    let mut dim = WallDimension::new_anchored(a, b, orient, offset_mm, [0.0, 0.0], [0.0, 0.0]);
+    dim.label = label.to_string();
+    let (r0, r1) = wall.resolve_dimension_endpoints(&dim, components);
+    dim.x0 = r0[0];
+    dim.y0 = r0[1];
+    dim.x1 = r1[0];
+    dim.y1 = r1[1];
+    state.dims.selected_dim_id = Some(dim.id.clone());
+    wall.dimensions.push(dim);
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_context_menu(
+    ui: &mut egui::Ui,
+    pal: &StudioPalette,
+    canvas_rect: Rect,
+    wall: &mut ProjectWall,
+    components: &[ComponentDef],
+    unit: DisplayUnit,
+    state: &mut Blueprint2DState,
+    actions: &mut Vec<BlueprintAction>,
+) {
+    let Some(menu) = state.context_menu.clone() else {
+        return;
+    };
+    let bounds = ui.ctx().content_rect().shrink(8.0);
+    let est_w = 228.0;
+    let est_h = 310.0;
+    let menu_pos = Pos2::new(
+        menu.screen_pos
+            .x
+            .clamp(bounds.left(), (bounds.right() - est_w).max(bounds.left())),
+        menu.screen_pos
+            .y
+            .clamp(bounds.top(), (bounds.bottom() - est_h).max(bounds.top())),
+    );
+
+    let mut close_menu = ui.ctx().input(|i| i.key_pressed(egui::Key::Escape));
+    let mut hovered_or_inside = false;
+
+    let area_resp = egui::Area::new(Id::unique("blueprint_context_menu"))
+        .fixed_pos(menu_pos)
+        .order(Order::Foreground)
+        .show(ui.ctx(), |ui| {
+            egui::Frame::NONE
+                .fill(pal.surface_panel)
+                .stroke(Stroke::new(1.2, pal.border_strong))
+                .corner_radius(CornerRadius::same(8))
+                .inner_margin(Margin::same(6))
+                .shadow(egui::Shadow {
+                    offset: [0, 6],
+                    blur: 18,
+                    spread: 1,
+                    color: Color32::from_rgba_unmultiplied(0, 0, 0, 80),
+                })
+                .show(ui, |ui| {
+                    ui.set_min_width(210.0);
+                    match menu.target {
+                        ContextTarget::Dimension(ref did) => {
+                            if ui.button("Edit Length / Drive Geometry...").clicked() {
+                                state.dims.begin_edit_dim(wall, components, did);
+                                close_menu = true;
+                            }
+                            if ui.button("Flip Dimension Side").clicked() {
+                                if let Some(d) = wall.dimensions.iter_mut().find(|d| &d.id == did) {
+                                    d.offset_mm = -d.offset_mm;
+                                    actions
+                                        .push(BlueprintAction::CommitUndo("Flip dimension side"));
+                                }
+                                close_menu = true;
+                            }
+                            ui.separator();
+                            if ui
+                                .button(RichText::new("Delete Dimension").color(pal.danger))
+                                .clicked()
+                            {
+                                wall.dimensions.retain(|d| &d.id != did);
+                                if state.dims.selected_dim_id.as_deref() == Some(did.as_str()) {
+                                    state.dims.selected_dim_id = None;
+                                }
+                                actions.push(BlueprintAction::CommitUndo("Delete dimension"));
+                                close_menu = true;
+                            }
+                        }
+                        ContextTarget::Opening(ref oid) => {
+                            if let Some(op) = wall.openings.iter().find(|o| &o.id == oid).cloned() {
+                                ui.label(RichText::new(&op.name).small().strong().color(pal.gold));
+                                ui.separator();
+                                if ui.button("Dimension Width").clicked() {
+                                    push_anchored_dim(
+                                        wall,
+                                        components,
+                                        state,
+                                        DimAnchor::OpeningEdge {
+                                            opening_id: oid.clone(),
+                                            edge: OpeningEdgeKind::Left,
+                                        },
+                                        DimAnchor::OpeningEdge {
+                                            opening_id: oid.clone(),
+                                            edge: OpeningEdgeKind::Right,
+                                        },
+                                        DimOrientation::Horizontal,
+                                        12.0,
+                                        "",
+                                    );
+                                    actions.push(BlueprintAction::CommitUndo(
+                                        "Dimension opening width",
+                                    ));
+                                    close_menu = true;
+                                }
+                                if ui.button("Dimension Height").clicked() {
+                                    push_anchored_dim(
+                                        wall,
+                                        components,
+                                        state,
+                                        DimAnchor::OpeningEdge {
+                                            opening_id: oid.clone(),
+                                            edge: OpeningEdgeKind::Bottom,
+                                        },
+                                        DimAnchor::OpeningEdge {
+                                            opening_id: oid.clone(),
+                                            edge: OpeningEdgeKind::Top,
+                                        },
+                                        DimOrientation::Vertical,
+                                        -12.0,
+                                        "",
+                                    );
+                                    actions.push(BlueprintAction::CommitUndo(
+                                        "Dimension opening height",
+                                    ));
+                                    close_menu = true;
+                                }
+                                if ui.button("Dimension Left Clearance").clicked() {
+                                    push_anchored_dim(
+                                        wall,
+                                        components,
+                                        state,
+                                        DimAnchor::WallEdge {
+                                            edge: WallEdgeKind::Left,
+                                        },
+                                        DimAnchor::OpeningEdge {
+                                            opening_id: oid.clone(),
+                                            edge: OpeningEdgeKind::Left,
+                                        },
+                                        DimOrientation::Horizontal,
+                                        8.0,
+                                        "L",
+                                    );
+                                    actions
+                                        .push(BlueprintAction::CommitUndo("Dimension clearance"));
+                                    close_menu = true;
+                                }
+                                if ui.button("Dimension Sill Height").clicked() {
+                                    push_anchored_dim(
+                                        wall,
+                                        components,
+                                        state,
+                                        DimAnchor::WallEdge {
+                                            edge: WallEdgeKind::Bottom,
+                                        },
+                                        DimAnchor::OpeningEdge {
+                                            opening_id: oid.clone(),
+                                            edge: OpeningEdgeKind::Bottom,
+                                        },
+                                        DimOrientation::Vertical,
+                                        8.0,
+                                        "Sill",
+                                    );
+                                    actions
+                                        .push(BlueprintAction::CommitUndo("Dimension sill height"));
+                                    close_menu = true;
+                                }
+                                ui.separator();
+                                if ui.button("Inspect in 3D").clicked() {
+                                    actions.push(BlueprintAction::QuickAction(
+                                        QuickBarAction::Inspect3D,
+                                    ));
+                                    close_menu = true;
+                                }
+                                if ui.button("Duplicate").clicked() {
+                                    actions.push(BlueprintAction::QuickAction(
+                                        QuickBarAction::Duplicate,
+                                    ));
+                                    close_menu = true;
+                                }
+                                let comp_lbl = if op.is_component() {
+                                    "Make Unique Copy"
+                                } else {
+                                    "Make Shared Component"
+                                };
+                                if ui.button(comp_lbl).clicked() {
+                                    actions.push(BlueprintAction::QuickAction(
+                                        if op.is_component() {
+                                            QuickBarAction::MakeUnique
+                                        } else {
+                                            QuickBarAction::PromoteToComponent
+                                        },
+                                    ));
+                                    close_menu = true;
+                                }
+                                if ui.button("Save as Template...").clicked() {
+                                    actions.push(BlueprintAction::QuickAction(
+                                        QuickBarAction::SaveAsTemplate,
+                                    ));
+                                    close_menu = true;
+                                }
+                                if ui.button("Snap to Floor (Y = 0)").clicked() {
+                                    actions.push(BlueprintAction::SnapSelectedToFloor);
+                                    close_menu = true;
+                                }
+                                let lock_lbl =
+                                    if op.lock_position || op.lock_width || op.lock_height {
+                                        "Unlock Position & Size"
+                                    } else {
+                                        "Lock Position & Size"
+                                    };
+                                if ui.button(lock_lbl).clicked() {
+                                    actions.push(BlueprintAction::QuickAction(
+                                        QuickBarAction::ToggleLock,
+                                    ));
+                                    close_menu = true;
+                                }
+                                ui.separator();
+                                if ui
+                                    .button(RichText::new("Delete").color(pal.danger))
+                                    .clicked()
+                                {
+                                    actions
+                                        .push(BlueprintAction::QuickAction(QuickBarAction::Delete));
+                                    close_menu = true;
+                                }
+                            } else {
+                                close_menu = true;
+                            }
+                        }
+                        ContextTarget::Wall { x_mm, y_mm } => {
+                            ui.collapsing("Add Window Here...", |ui| {
+                                for &s in &WindowStyle::ALL_WINDOWS {
+                                    if ui.button(s.name()).clicked() {
+                                        actions.push(BlueprintAction::DropStyle {
+                                            style: s,
+                                            x_mm: (x_mm - 28.0)
+                                                .clamp(0.0, (wall.width - 56.0).max(0.0)),
+                                            y_mm: (y_mm - 38.0)
+                                                .clamp(0.0, (wall.height - 76.0).max(0.0)),
+                                        });
+                                        close_menu = true;
+                                    }
+                                }
+                            });
+                            ui.collapsing("Add Door Here...", |ui| {
+                                for &s in &WindowStyle::ALL_DOORS {
+                                    if ui.button(s.name()).clicked() {
+                                        actions.push(BlueprintAction::DropStyle {
+                                            style: s,
+                                            x_mm: (x_mm - 38.0)
+                                                .clamp(0.0, (wall.width - 76.0).max(0.0)),
+                                            y_mm: 0.0,
+                                        });
+                                        close_menu = true;
+                                    }
+                                }
+                            });
+                            ui.separator();
+                            let dim_lbl = if state.dims.active_draw_mode {
+                                "Exit Draw Dimension Mode"
+                            } else {
+                                "Draw CAD Dimension"
+                            };
+                            if ui.button(dim_lbl).clicked() {
+                                state.dims.active_draw_mode = !state.dims.active_draw_mode;
+                                close_menu = true;
+                            }
+                            if ui.button("Auto-Dimension Wall").clicked() {
+                                actions.push(BlueprintAction::AutoDimensionWall);
+                                close_menu = true;
+                            }
+                            ui.separator();
+                            if ui.button("Import / Replace Wall Photo...").clicked() {
+                                actions.push(BlueprintAction::ImportWallPhoto);
+                                close_menu = true;
+                            }
+                            if wall.photo.has_photo() {
+                                if ui.button("Open Photo Setup Wizard...").clicked() {
+                                    actions.push(BlueprintAction::OpenPhotoWizard);
+                                    close_menu = true;
+                                }
+                                let p_lbl = if state.edit_photo_mode {
+                                    "Finish Photo Handles"
+                                } else {
+                                    "Adjust Photo Handles on Canvas"
+                                };
+                                if ui.button(p_lbl).clicked() {
+                                    state.edit_photo_mode = !state.edit_photo_mode;
+                                    close_menu = true;
+                                }
+                                if ui.button("Fit Photo to Wall").clicked() {
+                                    let (ww, wh) = (wall.width, wall.height);
+                                    wall.photo.fit_to_wall(ww, wh);
+                                    actions.push(BlueprintAction::CommitUndo("Fit photo to wall"));
+                                    close_menu = true;
+                                }
+                            }
+                            ui.separator();
+                            let mut show_arch = state.show_architrave_outlines;
+                            if ui
+                                .checkbox(&mut show_arch, "Show Architrave Outlines")
+                                .changed()
+                            {
+                                state.show_architrave_outlines = show_arch;
+                                actions.push(BlueprintAction::ToggleArchitraves(show_arch));
+                                close_menu = true;
+                            }
+                            if ui.button("Resize Wall...").clicked() {
+                                state.resize_wall_modal = Some((wall.width, wall.height));
+                                close_menu = true;
+                            }
+                            if ui.button("Fit Wall to View").clicked() {
+                                state.fit_wall(wall, canvas_rect);
+                                close_menu = true;
+                            }
+                        }
+                    }
+                });
+        });
+
+    if let Some(p) = ui.ctx().input(|i| i.pointer.hover_pos()) {
+        hovered_or_inside = area_resp.response.rect.expand(4.0).contains(p);
+    }
+    if ui.ctx().input(|i| i.pointer.primary_pressed()) && !hovered_or_inside {
+        close_menu = true;
+    }
+    let _ = unit;
+    if close_menu {
+        state.context_menu = None;
+    }
+}
+
+fn draw_resize_wall_modal(
+    ui: &mut egui::Ui,
+    pal: &StudioPalette,
+    canvas_rect: Rect,
+    unit: DisplayUnit,
+    state: &mut Blueprint2DState,
+    actions: &mut Vec<BlueprintAction>,
+) {
+    let Some((mut w_mm, mut h_mm)) = state.resize_wall_modal else {
+        return;
+    };
+    let mut apply = false;
+    let mut cancel = ui.ctx().input(|i| i.key_pressed(egui::Key::Escape));
+
+    egui::Area::new(Id::unique("blueprint_resize_wall_modal"))
+        .fixed_pos(canvas_rect.center() - Vec2::new(135.0, 70.0))
+        .order(Order::Foreground)
+        .show(ui.ctx(), |ui| {
+            egui::Frame::NONE
+                .fill(pal.surface_panel)
+                .stroke(Stroke::new(1.5, pal.accent))
+                .corner_radius(CornerRadius::same(8))
+                .inner_margin(Margin::same(12))
+                .show(ui, |ui| {
+                    ui.label(RichText::new("Resize Wall Dimensions").strong());
+                    ui.add_space(6.0);
+                    egui::Grid::new("bp_resize_wall_grid")
+                        .num_columns(2)
+                        .spacing([10.0, 6.0])
+                        .show(ui, |ui| {
+                            ui.label("Wall Width:");
+                            let mut dw = unit.from_mm(w_mm);
+                            if ui
+                                .add(
+                                    egui::DragValue::new(&mut dw)
+                                        .speed(unit.drag_speed())
+                                        .range(unit.from_mm(60.0)..=unit.from_mm(2000.0))
+                                        .max_decimals(unit.decimals().max(2))
+                                        .suffix(unit.suffix()),
+                                )
+                                .changed()
+                            {
+                                w_mm = unit.to_mm(dw).clamp(60.0, 2000.0);
+                            }
+                            ui.end_row();
+
+                            ui.label("Wall Height:");
+                            let mut dh = unit.from_mm(h_mm);
+                            if ui
+                                .add(
+                                    egui::DragValue::new(&mut dh)
+                                        .speed(unit.drag_speed())
+                                        .range(unit.from_mm(60.0)..=unit.from_mm(1500.0))
+                                        .max_decimals(unit.decimals().max(2))
+                                        .suffix(unit.suffix()),
+                                )
+                                .changed()
+                            {
+                                h_mm = unit.to_mm(dh).clamp(60.0, 1500.0);
+                            }
+                            ui.end_row();
+                        });
+                    ui.add_space(8.0);
+                    ui.horizontal(|ui| {
+                        if ui.button("Apply").clicked() {
+                            apply = true;
+                        }
+                        if ui.button("Cancel").clicked() {
+                            cancel = true;
+                        }
+                    });
+                });
+        });
+
+    if apply {
+        actions.push(BlueprintAction::ResizeWall {
+            width: w_mm,
+            height: h_mm,
+        });
+        actions.push(BlueprintAction::CommitUndo("Resize wall"));
+        state.resize_wall_modal = None;
+    } else if cancel {
+        state.resize_wall_modal = None;
+    } else {
+        state.resize_wall_modal = Some((w_mm, h_mm));
+    }
 }

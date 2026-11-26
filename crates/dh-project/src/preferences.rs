@@ -79,6 +79,8 @@ pub struct AppPreferences {
     pub last_projects_root: Option<PathBuf>,
     #[serde(default)]
     pub recent_projects: Vec<RecentProjectEntry>,
+    #[serde(default)]
+    pub has_seen_onboarding: bool,
 }
 
 impl Default for AppPreferences {
@@ -91,6 +93,7 @@ impl Default for AppPreferences {
             default_pdf_instance_mode: PdfInstanceModePref::UniqueWithQty,
             last_projects_root: None,
             recent_projects: Vec::new(),
+            has_seen_onboarding: false,
         }
     }
 }

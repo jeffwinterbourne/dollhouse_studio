@@ -134,14 +134,14 @@ pub fn paint_photo_underlay(
     let alpha = ((cfg.opacity.clamp(0.05, 1.0)) * 255.0).round() as u8;
     let tint = Color32::from_rgba_unmultiplied(255, 255, 255, alpha);
 
-    // When directly picking 4 perspective pins on-canvas, show the raw image texture underneath
-    // so corners do not shift beneath the pointer while adjusting pins.
+    // When directly picking 4 perspective pins on-canvas, show the oriented texture (respecting rotation)
+    // underneath so corners do not shift beneath the pointer while adjusting pins.
     if active
         && tool == PhotoCanvasTool::PerspectivePins
-        && let Some((raw_tex, _, _)) = cache.raw_texture()
+        && let Some((orient_tex, _, _)) = cache.oriented_texture()
     {
         painter.image(
-            raw_tex.id(),
+            orient_tex.id(),
             rect,
             Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
             tint,
@@ -249,6 +249,7 @@ pub fn interact_photo_overlay(
         }
         PhotoCanvasTool::PerspectivePins => {
             interact_perspective_pins(
+                ui.ctx(),
                 painter,
                 pal,
                 photo_rect,
@@ -276,6 +277,7 @@ pub fn interact_photo_overlay(
         }
         PhotoCanvasTool::TwoPointCalibrate => {
             interact_caliper(
+                ui.ctx(),
                 painter,
                 pal,
                 xform,
@@ -686,6 +688,7 @@ fn interact_rotate(
 
 #[allow(clippy::too_many_arguments)]
 fn interact_perspective_pins(
+    ctx: &egui::Context,
     painter: &egui::Painter,
     pal: &StudioPalette,
     photo_rect: Rect,
@@ -773,9 +776,11 @@ fn interact_perspective_pins(
         );
     }
 
-    // Zoomed Cursor Magnifier Loupe when dragging any corner pin!
-    if let (Some(uv), Some(pos)) = (active_uv, active_pos) {
-        draw_cursor_loupe(painter, pal, cache, pos, uv);
+    // Zoomed Cursor Magnifier Loupe on top tooltip layer when dragging any corner pin.
+    if let (Some(uv), Some(pos)) = (active_uv, active_pos)
+        && let Some((orient_tex, _, _)) = cache.oriented_texture()
+    {
+        draw_cursor_loupe(ctx, pal, orient_tex.id(), pos, uv);
     }
 }
 
@@ -903,6 +908,7 @@ fn interact_crop(
 
 #[allow(clippy::too_many_arguments)]
 fn interact_caliper(
+    ctx: &egui::Context,
     painter: &egui::Painter,
     pal: &StudioPalette,
     xform: BlueprintXform,
@@ -955,12 +961,16 @@ fn interact_caliper(
             }
             _ => false,
         };
-        if show_loupe && photo_rect.width() > 4.0 && photo_rect.height() > 4.0 {
+        if show_loupe
+            && photo_rect.width() > 4.0
+            && photo_rect.height() > 4.0
+            && let Some((_, proc_tex)) = cache.loaded_egui_texture()
+        {
             let uv = [
                 ((pos.x - photo_rect.left()) / photo_rect.width()).clamp(0.0, 1.0) as f64,
                 ((pos.y - photo_rect.top()) / photo_rect.height()).clamp(0.0, 1.0) as f64,
             ];
-            draw_cursor_loupe(painter, pal, cache, pos, uv);
+            draw_cursor_loupe(ctx, pal, proc_tex.id(), pos, uv);
         }
     }
 
@@ -1077,11 +1087,19 @@ pub fn draw_caliper_control_bar(
                         if ui.small_button("-1").clicked() {
                             state.caliper_target_mm = (state.caliper_target_mm - 1.0).max(5.0);
                         }
-                        ui.label(
-                            RichText::new(unit.format_value(state.caliper_target_mm))
-                                .strong()
-                                .color(pal.gold),
-                        );
+                        let mut exact_disp = unit.from_mm(state.caliper_target_mm);
+                        if ui
+                            .add(
+                                egui::DragValue::new(&mut exact_disp)
+                                    .speed(unit.drag_speed() * 0.5)
+                                    .range(unit.from_mm(2.0)..=unit.from_mm(2500.0))
+                                    .max_decimals(unit.decimals().max(2))
+                                    .suffix(unit.suffix()),
+                            )
+                            .changed()
+                        {
+                            state.caliper_target_mm = unit.to_mm(exact_disp).max(1.0);
+                        }
                         if ui.small_button("+1").clicked() {
                             state.caliper_target_mm = (state.caliper_target_mm + 1.0).min(1200.0);
                         }
@@ -1122,28 +1140,42 @@ pub fn draw_caliper_control_bar(
 }
 
 fn draw_cursor_loupe(
-    painter: &egui::Painter,
+    ctx: &egui::Context,
     pal: &StudioPalette,
-    cache: &WallPhotoTextureCache,
+    tex_id: egui::TextureId,
     cursor_pos: Pos2,
     uv: [f64; 2],
 ) {
-    let Some((raw_tex, _, _)) = cache.raw_texture() else {
-        return;
-    };
-    let size = 108.0;
-    let loupe_center = cursor_pos + Vec2::new(82.0, -76.0);
-    let loupe_rect = Rect::from_center_size(loupe_center, Vec2::splat(size));
+    let bounds = ctx.content_rect().shrink(10.0);
+    let size = Vec2::splat(124.0);
+    let mut center = cursor_pos + Vec2::new(92.0, -88.0);
+    if center.x + size.x * 0.5 > bounds.right() {
+        center.x = cursor_pos.x - 92.0;
+    }
+    if center.y - size.y * 0.5 < bounds.top() {
+        center.y = cursor_pos.y + 88.0;
+    }
+    let mut loupe_rect = Rect::from_center_size(center, size);
+    loupe_rect = loupe_rect.translate(Vec2::new(
+        (bounds.left() - loupe_rect.left()).max(0.0)
+            - (loupe_rect.right() - bounds.right()).max(0.0),
+        (bounds.top() - loupe_rect.top()).max(0.0)
+            - (loupe_rect.bottom() - bounds.bottom()).max(0.0),
+    ));
 
+    let painter = ctx.layer_painter(egui::LayerId::new(
+        egui::Order::Tooltip,
+        egui::Id::unique("blueprint_photo_loupe"),
+    ));
     painter.rect_filled(loupe_rect.expand(3.0), 8.0, pal.hud_glass);
-    let half_span = 0.08_f32;
+    let half_span = 0.06_f32;
     let u0 = (uv[0] as f32 - half_span).clamp(0.0, 1.0 - half_span * 2.0);
     let v0 = (uv[1] as f32 - half_span).clamp(0.0, 1.0 - half_span * 2.0);
     let uv_rect = Rect::from_min_max(
         Pos2::new(u0, v0),
         Pos2::new(u0 + half_span * 2.0, v0 + half_span * 2.0),
     );
-    painter.image(raw_tex.id(), loupe_rect, uv_rect, Color32::WHITE);
+    painter.image(tex_id, loupe_rect, uv_rect, Color32::WHITE);
     painter.rect_stroke(
         loupe_rect,
         6.0,
@@ -1151,21 +1183,21 @@ fn draw_cursor_loupe(
         StrokeKind::Outside,
     );
 
-    // Crosshair inside loupe.
-    let cx = loupe_rect.center().x;
-    let cy = loupe_rect.center().y;
+    // Crosshair inside loupe aligned with exact pointer sample.
+    let cx = loupe_rect.left() + ((uv[0] as f32 - u0) / (half_span * 2.0)) * loupe_rect.width();
+    let cy = loupe_rect.top() + ((uv[1] as f32 - v0) / (half_span * 2.0)) * loupe_rect.height();
     let ch = Stroke::new(1.3, pal.gold);
     painter.line_segment(
         [
-            Pos2::new(loupe_rect.left() + 8.0, cy),
-            Pos2::new(loupe_rect.right() - 8.0, cy),
+            Pos2::new(loupe_rect.left() + 6.0, cy),
+            Pos2::new(loupe_rect.right() - 6.0, cy),
         ],
         ch,
     );
     painter.line_segment(
         [
-            Pos2::new(cx, loupe_rect.top() + 8.0),
-            Pos2::new(cx, loupe_rect.bottom() - 8.0),
+            Pos2::new(cx, loupe_rect.top() + 6.0),
+            Pos2::new(cx, loupe_rect.bottom() - 6.0),
         ],
         ch,
     );

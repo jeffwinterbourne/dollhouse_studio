@@ -66,3 +66,13 @@ fn ray_aabb_and_viewcube_quad_hit_tests() {
     assert!(point_in_convex_quad(Pos2::new(20.0, 20.0), &quad));
     assert!(!point_in_convex_quad(Pos2::new(5.0, 20.0), &quad));
 }
+
+#[test]
+fn stand_front_orients_exterior_face_to_negative_y_front_with_z_up() {
+    let m = dh_render::stand_front();
+    assert!((m.determinant() - 1.0).abs() < 1e-5);
+    let front_normal = m.transform_vector3(Vec3::new(0.0, 0.0, -1.0));
+    let top_vec = m.transform_vector3(Vec3::new(0.0, 1.0, 0.0));
+    assert!((front_normal - Vec3::new(0.0, -1.0, 0.0)).length() < 1e-5);
+    assert!((top_vec - Vec3::new(0.0, 0.0, 1.0)).length() < 1e-5);
+}

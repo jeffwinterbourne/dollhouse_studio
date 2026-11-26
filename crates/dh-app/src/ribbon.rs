@@ -9,7 +9,7 @@ use dh_export::BedSizePreset;
 use dh_project::ThemeMode;
 use dh_render::{CameraPreset, ViewportSettings};
 use eframe::egui::{
-    self, Color32, CornerRadius, Margin, Pos2, Rect, RichText, Sense, Stroke, Vec2,
+    self, Align2, Color32, CornerRadius, Margin, Rect, RichText, Sense, Stroke, Vec2,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -92,9 +92,11 @@ impl Default for RibbonState {
 
 #[derive(Debug, Clone)]
 pub enum RibbonAction {
-    GoHomeHub,
+    OpenHubOverlay,
+    OpenGettingStartedTour,
     NewProject,
     OpenFolder,
+    OpenProjectDirInOs,
     SaveProject,
     PromoteToMultiWall,
     Undo,
@@ -112,6 +114,7 @@ pub enum RibbonAction {
     AlignDistributeH,
     AlignMirrorH,
     SnapDoorFloor,
+    ToggleArchitraves(bool),
 
     // Design
     SaveSelectionAsTemplate,
@@ -167,6 +170,7 @@ pub fn draw_top_ribbon(
     ui: &mut egui::Ui,
     pal: &StudioPalette,
     project: &Project,
+    has_project_dir: bool,
     dirty: bool,
     undo: &UndoHistory<Project>,
     unit: DisplayUnit,
@@ -178,6 +182,7 @@ pub fn draw_top_ribbon(
     draw_dim_mode: bool,
     show_grid: bool,
     show_rulers: bool,
+    show_architraves: bool,
     view3d: &ViewportSettings,
     wall_solid: bool,
     state: &mut RibbonState,
@@ -191,12 +196,11 @@ pub fn draw_top_ribbon(
         .inner_margin(Margin::symmetric(10, 5))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                if ui
-                    .button("Hub")
-                    .on_hover_text("Return to Start / Project Hub")
+                if ribbon_pill_btn(ui, pal, VectorIcon::Hub, "Hub", false, true)
+                    .on_hover_text("Open Floating Project & Template Hub")
                     .clicked()
                 {
-                    actions.push(RibbonAction::GoHomeHub);
+                    actions.push(RibbonAction::OpenHubOverlay);
                 }
                 ui.separator();
 
@@ -213,15 +217,7 @@ pub fn draw_top_ribbon(
                 );
                 ui.separator();
 
-                let save_btn = egui::Button::new(RichText::new("Save").strong().color(if dirty {
-                    pal.accent_text
-                } else {
-                    pal.text_primary
-                }))
-                .fill(if dirty { pal.accent } else { pal.surface_card })
-                .corner_radius(CornerRadius::same(5));
-                if ui
-                    .add(save_btn)
+                if ribbon_pill_btn(ui, pal, VectorIcon::Save, "Save", dirty, true)
                     .on_hover_text("Save Project Folder (Ctrl+S)")
                     .clicked()
                 {
@@ -232,8 +228,7 @@ pub fn draw_top_ribbon(
                     .undo_label()
                     .map(|l| format!("Undo: {l} (Ctrl+Z)"))
                     .unwrap_or_else(|| "Nothing to undo".to_string());
-                if ui
-                    .add_enabled(undo.can_undo(), egui::Button::new("Undo"))
+                if ribbon_pill_btn(ui, pal, VectorIcon::Undo, "Undo", false, undo.can_undo())
                     .on_hover_text(undo_tip)
                     .clicked()
                 {
@@ -244,8 +239,7 @@ pub fn draw_top_ribbon(
                     .redo_label()
                     .map(|l| format!("Redo: {l} (Ctrl+Y)"))
                     .unwrap_or_else(|| "Nothing to redo".to_string());
-                if ui
-                    .add_enabled(undo.can_redo(), egui::Button::new("Redo"))
+                if ribbon_pill_btn(ui, pal, VectorIcon::Redo, "Redo", false, undo.can_redo())
                     .on_hover_text(redo_tip)
                     .clicked()
                 {
@@ -254,7 +248,6 @@ pub fn draw_top_ribbon(
 
                 ui.separator();
 
-                // Primary Viewport Switcher
                 if is_multi {
                     let mut vp = viewport;
                     if segmented_pill(
@@ -271,16 +264,28 @@ pub fn draw_top_ribbon(
                     }
                 } else {
                     ui.label(RichText::new("Piece 3D View").strong().color(pal.accent));
-                    if ui
-                        .small_button("Promote to House / Multi-Wall")
-                        .on_hover_text("Expand this single object into a multi-wall house project")
-                        .clicked()
+                    if ribbon_pill_btn(
+                        ui,
+                        pal,
+                        VectorIcon::Wall,
+                        "Promote to Multi-Wall",
+                        false,
+                        true,
+                    )
+                    .clicked()
                     {
                         actions.push(RibbonAction::PromoteToMultiWall);
                     }
                 }
 
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ribbon_pill_btn(ui, pal, VectorIcon::HelpTour, "Tour", false, true)
+                        .on_hover_text("Open interactive Getting Started Walkthrough")
+                        .clicked()
+                    {
+                        actions.push(RibbonAction::OpenGettingStartedTour);
+                    }
+
                     let mut t = theme_mode;
                     if segmented_pill(
                         ui,
@@ -313,7 +318,7 @@ pub fn draw_top_ribbon(
 
             ui.add_space(4.0);
 
-            // 2) Ribbon Tab Selector Strip
+            // 2) Ribbon Tab Selector Strip (defaults to Home)
             ui.horizontal(|ui| {
                 for tab in RibbonTab::ALL {
                     if !is_multi && matches!(tab, RibbonTab::Photo | RibbonTab::Annotate) {
@@ -352,7 +357,7 @@ pub fn draw_top_ribbon(
             });
         });
 
-    // 3) Contextual Ribbon Command Strip
+    // 3) Contextual Ribbon Command Strip with Vector Icons
     egui::Frame::NONE
         .fill(pal.surface_card)
         .stroke(Stroke::new(1.0, pal.border))
@@ -360,71 +365,195 @@ pub fn draw_top_ribbon(
         .show(ui, |ui| {
             ui.horizontal(|ui| match state.active_tab {
                 RibbonTab::File => {
-                    if ui.button("New Project Folder...").clicked() {
-                        actions.push(RibbonAction::NewProject);
-                    }
-                    if ui.button("Open Project Folder...").clicked() {
-                        actions.push(RibbonAction::OpenFolder);
-                    }
-                    if ui.button("Save Project (Ctrl+S)").clicked() {
-                        actions.push(RibbonAction::SaveProject);
-                    }
+                    ribbon_group(ui, pal, "Project", |ui| {
+                        if ribbon_tile(ui, pal, VectorIcon::Plus, "New Project", false, true)
+                            .clicked()
+                        {
+                            actions.push(RibbonAction::NewProject);
+                        }
+                        if ribbon_tile(ui, pal, VectorIcon::Folder, "Open Folder", false, true)
+                            .clicked()
+                        {
+                            actions.push(RibbonAction::OpenFolder);
+                        }
+                        if ribbon_tile(ui, pal, VectorIcon::Save, "Save", dirty, true).clicked() {
+                            actions.push(RibbonAction::SaveProject);
+                        }
+                        if ribbon_tile(ui, pal, VectorIcon::Hub, "Project Hub", false, true)
+                            .clicked()
+                        {
+                            actions.push(RibbonAction::OpenHubOverlay);
+                        }
+                    });
                     ui.separator();
-                    if !is_multi && ui.button("Promote to House / Multi-Wall").clicked() {
-                        actions.push(RibbonAction::PromoteToMultiWall);
-                    }
-                    if ui.button("Close to Start Hub").clicked() {
-                        actions.push(RibbonAction::GoHomeHub);
-                    }
+                    ribbon_group(ui, pal, "Workspace & Share", |ui| {
+                        if ribbon_tile(
+                            ui,
+                            pal,
+                            VectorIcon::OpenExternal,
+                            "Show Folder",
+                            false,
+                            has_project_dir,
+                        )
+                        .on_hover_text("Reveal project folder on disk")
+                        .clicked()
+                        {
+                            actions.push(RibbonAction::OpenProjectDirInOs);
+                        }
+                        if ribbon_tile(ui, pal, VectorIcon::ExportPdf, "Booklet PDF", false, true)
+                            .clicked()
+                        {
+                            actions.push(RibbonAction::ExportBookletPdf);
+                        }
+                        if !is_multi
+                            && ribbon_tile(ui, pal, VectorIcon::Wall, "Make House", false, true)
+                                .clicked()
+                        {
+                            actions.push(RibbonAction::PromoteToMultiWall);
+                        }
+                        if ribbon_tile(ui, pal, VectorIcon::HelpTour, "Quick Tour", false, true)
+                            .clicked()
+                        {
+                            actions.push(RibbonAction::OpenGettingStartedTour);
+                        }
+                    });
                 }
                 RibbonTab::Home => {
                     if is_multi {
                         ribbon_group(ui, pal, "Insert Opening", |ui| {
-                            if ribbon_icon_button(ui, pal, VectorIcon::Window, "Add Window") {
-                                actions.push(RibbonAction::AddOpeningStyle(WindowStyle::GeorgianGrid));
+                            if ribbon_tile(ui, pal, VectorIcon::Window, "Add Window", false, true)
+                                .clicked()
+                            {
+                                actions.push(RibbonAction::AddOpeningStyle(
+                                    WindowStyle::GeorgianGrid,
+                                ));
                             }
-                            if ribbon_icon_button(ui, pal, VectorIcon::Door, "Add Door") {
-                                actions.push(RibbonAction::AddOpeningStyle(WindowStyle::DoorColonial4Panel));
+                            if ribbon_tile(ui, pal, VectorIcon::Door, "Add Door", false, true)
+                                .clicked()
+                            {
+                                actions.push(RibbonAction::AddOpeningStyle(
+                                    WindowStyle::DoorColonial4Panel,
+                                ));
+                            }
+                            if ribbon_tile(
+                                ui,
+                                pal,
+                                VectorIcon::Photo,
+                                "Wall Photo",
+                                false,
+                                true,
+                            )
+                            .on_hover_text("Import reference wall photo")
+                            .clicked()
+                            {
+                                actions.push(RibbonAction::ImportWallPhoto);
                             }
                         });
                         ui.separator();
-                        ribbon_group(ui, pal, "Walls", |ui| {
-                            if ribbon_icon_button(ui, pal, VectorIcon::Wall, "New Wall") {
+                        ribbon_group(ui, pal, "Walls & Tolerances", |ui| {
+                            if ribbon_tile(ui, pal, VectorIcon::Wall, "New Wall", false, true)
+                                .clicked()
+                            {
                                 actions.push(RibbonAction::NewBlankWall);
                             }
-                            if ui.button("Duplicate Wall").clicked() {
+                            if ribbon_tile(
+                                ui,
+                                pal,
+                                VectorIcon::Duplicate,
+                                "Copy Wall",
+                                false,
+                                true,
+                            )
+                            .clicked()
+                            {
                                 actions.push(RibbonAction::DuplicateActiveWall);
+                            }
+                            if ribbon_tile(
+                                ui,
+                                pal,
+                                VectorIcon::Architrave,
+                                "Architraves",
+                                show_architraves,
+                                true,
+                            )
+                            .on_hover_text(
+                                "Toggle outer trim/architrave outlines & spacing overlap warnings on Blueprint",
+                            )
+                            .clicked()
+                            {
+                                actions.push(RibbonAction::ToggleArchitraves(!show_architraves));
                             }
                         });
                         ui.separator();
                         ribbon_group(ui, pal, "Arrange Selection", |ui| {
                             let en = selected_count > 0;
-                            if ui.add_enabled(en, egui::Button::new("Center H")).clicked() {
+                            if ribbon_pill_btn(
+                                ui,
+                                pal,
+                                VectorIcon::AlignCenter,
+                                "Center H",
+                                false,
+                                en,
+                            )
+                            .clicked()
+                            {
                                 actions.push(RibbonAction::AlignCenterH);
                             }
-                            if ui
-                                .add_enabled(selected_count >= 2, egui::Button::new("Distribute"))
-                                .clicked()
+                            if ribbon_pill_btn(
+                                ui,
+                                pal,
+                                VectorIcon::Distribute,
+                                "Distribute",
+                                false,
+                                selected_count >= 2,
+                            )
+                            .clicked()
                             {
                                 actions.push(RibbonAction::AlignDistributeH);
                             }
-                            if ui.add_enabled(en, egui::Button::new("Mirror")).clicked() {
+                            if ribbon_pill_btn(ui, pal, VectorIcon::Mirror, "Mirror", false, en)
+                                .clicked()
+                            {
                                 actions.push(RibbonAction::AlignMirrorH);
                             }
-                            if ui
-                                .add_enabled(en, egui::Button::new("Snap Floor"))
-                                .on_hover_text("Drop selected opening bottom to floor (Y = 0)")
-                                .clicked()
+                            if ribbon_pill_btn(
+                                ui,
+                                pal,
+                                VectorIcon::SnapFloor,
+                                "Floor Y=0",
+                                false,
+                                en,
+                            )
+                            .on_hover_text("Drop selected opening bottom to floor (Y = 0)")
+                            .clicked()
                             {
                                 actions.push(RibbonAction::SnapDoorFloor);
                             }
                         });
                     } else {
-                        ribbon_group(ui, pal, "Templates & Reuse", |ui| {
-                            if ui.button("Save As Template...").clicked() {
+                        ribbon_group(ui, pal, "Piece & Reuse", |ui| {
+                            if ribbon_tile(
+                                ui,
+                                pal,
+                                VectorIcon::Template,
+                                "Save Template",
+                                false,
+                                true,
+                            )
+                            .clicked()
+                            {
                                 actions.push(RibbonAction::SaveSelectionAsTemplate);
                             }
-                            if ui.button("Promote to Multi-Wall").clicked() {
+                            if ribbon_tile(
+                                ui,
+                                pal,
+                                VectorIcon::Wall,
+                                "Promote House",
+                                false,
+                                true,
+                            )
+                            .clicked()
+                            {
                                 actions.push(RibbonAction::PromoteToMultiWall);
                             }
                         });
@@ -450,7 +579,7 @@ pub fn draw_top_ribbon(
 
                     egui::ScrollArea::horizontal()
                         .id_salt("design_style_strip")
-                        .max_width((ui.available_width() - 320.0).max(200.0))
+                        .max_width((ui.available_width() - 340.0).max(200.0))
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
                                 let styles: &[WindowStyle] = match state.style_filter {
@@ -460,7 +589,7 @@ pub fn draw_top_ribbon(
                                 };
                                 for &style in styles {
                                     let (rect, resp) = ui.allocate_exact_size(
-                                        Vec2::splat(40.0),
+                                        Vec2::splat(42.0),
                                         Sense::click_and_drag(),
                                     );
                                     draw_style_thumbnail(ui.painter(), rect, style, false, pal);
@@ -482,11 +611,30 @@ pub fn draw_top_ribbon(
                         });
 
                     ui.separator();
-                    ribbon_group(ui, pal, "Actions & Scale", |ui| {
-                        if ui.button("Save Template...").clicked() {
+                    ribbon_group(ui, pal, "Reuse & Scale", |ui| {
+                        if ribbon_pill_btn(
+                            ui,
+                            pal,
+                            VectorIcon::Template,
+                            "Save Template",
+                            false,
+                            true,
+                        )
+                        .clicked()
+                        {
                             actions.push(RibbonAction::SaveSelectionAsTemplate);
                         }
-                        if is_multi && selected_count == 1 && ui.button("Make Component").clicked() {
+                        if is_multi
+                            && ribbon_pill_btn(
+                                ui,
+                                pal,
+                                VectorIcon::ComponentLink,
+                                "Make Component",
+                                false,
+                                selected_count == 1,
+                            )
+                            .clicked()
+                        {
                             actions.push(RibbonAction::MakeSelectedComponent);
                         }
                         egui::ComboBox::from_id_salt("ribbon_scale")
@@ -495,7 +643,10 @@ pub fn draw_top_ribbon(
                             .show_ui(ui, |ui| {
                                 for sc in ScalePreset::ALL {
                                     if ui
-                                        .selectable_label(project.manifest.scale_preset == sc, sc.label())
+                                        .selectable_label(
+                                            project.manifest.scale_preset == sc,
+                                            sc.label(),
+                                        )
                                         .clicked()
                                     {
                                         actions.push(RibbonAction::ApplyScalePreset(sc));
@@ -508,30 +659,45 @@ pub fn draw_top_ribbon(
                     let wall_opt = project.active_wall();
                     let has_photo = wall_opt.is_some_and(|w| w.photo.has_photo());
                     ribbon_group(ui, pal, "Photo Import", |ui| {
-                        if ribbon_icon_button(ui, pal, VectorIcon::Photo, "Import Photo...") {
+                        if ribbon_tile(ui, pal, VectorIcon::Photo, "Import Photo", false, true)
+                            .clicked()
+                        {
                             actions.push(RibbonAction::ImportWallPhoto);
                         }
-                        if has_photo && ui.button("Wizard...").clicked() {
+                        if ribbon_tile(ui, pal, VectorIcon::Wizard, "Setup Wizard", false, has_photo)
+                            .on_hover_text("Open large pan/zoom Photo Setup Wizard")
+                            .clicked()
+                        {
                             actions.push(RibbonAction::OpenPhotoWizard);
                         }
                     });
                     ui.separator();
                     if let Some(wall) = wall_opt {
                         if has_photo {
-                            ribbon_group(ui, pal, "Mouse Tools", |ui| {
-                                let mut edit = photo_edit_mode;
-                                if ui.toggle_value(&mut edit, "Edit on Canvas").changed() {
-                                    actions.push(RibbonAction::SetPhotoEditMode(edit));
+                            ribbon_group(ui, pal, "Direct Canvas Tools", |ui| {
+                                if ribbon_pill_btn(
+                                    ui,
+                                    pal,
+                                    VectorIcon::Blueprint,
+                                    "Edit on Canvas",
+                                    photo_edit_mode,
+                                    true,
+                                )
+                                .clicked()
+                                {
+                                    actions.push(RibbonAction::SetPhotoEditMode(!photo_edit_mode));
                                 }
-                                for tool in [
-                                    PhotoCanvasTool::MoveStretch,
-                                    PhotoCanvasTool::Rotate,
-                                    PhotoCanvasTool::PerspectivePins,
-                                    PhotoCanvasTool::Crop,
-                                    PhotoCanvasTool::TwoPointCalibrate,
+                                for (tool, icon) in [
+                                    (PhotoCanvasTool::MoveStretch, VectorIcon::FitView),
+                                    (PhotoCanvasTool::Rotate, VectorIcon::Rotate),
+                                    (PhotoCanvasTool::PerspectivePins, VectorIcon::Perspective),
+                                    (PhotoCanvasTool::Crop, VectorIcon::Crop),
+                                    (PhotoCanvasTool::TwoPointCalibrate, VectorIcon::Caliper),
                                 ] {
                                     let active = photo_edit_mode && photo_tool == tool;
-                                    if ui.selectable_label(active, tool.label()).clicked() {
+                                    if ribbon_pill_btn(ui, pal, icon, tool.label(), active, true)
+                                        .clicked()
+                                    {
                                         actions.push(RibbonAction::SetPhotoEditMode(true));
                                         actions.push(RibbonAction::SetPhotoTool(tool));
                                     }
@@ -549,81 +715,145 @@ pub fn draw_top_ribbon(
                                 }
                                 let mut op = wall.photo.opacity;
                                 ui.spacing_mut().slider_width = 72.0;
-                                if ui.add(egui::Slider::new(&mut op, 0.1..=1.0).show_value(false)).changed() {
+                                if ui
+                                    .add(egui::Slider::new(&mut op, 0.1..=1.0).show_value(false))
+                                    .changed()
+                                {
                                     actions.push(RibbonAction::SetPhotoOpacity(op));
                                 }
-                                if ui.button("Fit Wall").clicked() {
+                                if ribbon_pill_btn(
+                                    ui,
+                                    pal,
+                                    VectorIcon::FitView,
+                                    "Fit",
+                                    false,
+                                    true,
+                                )
+                                .clicked()
+                                {
                                     actions.push(RibbonAction::FitPhotoToWall);
                                 }
-                                if ui.button("Exact").clicked() {
+                                if ui.small_button("Exact").clicked() {
                                     actions.push(RibbonAction::MatchPhotoExactWall);
                                 }
-                                if ui.button("Clear").clicked() {
+                                if ribbon_pill_btn(ui, pal, VectorIcon::Trash, "Clear", false, true)
+                                    .clicked()
+                                {
                                     actions.push(RibbonAction::ClearWallPhoto);
                                 }
                             });
                         } else {
                             ui.label(
-                                RichText::new("Import a reference photo of a dollhouse wall to calibrate, rectify perspective pins, and trace openings.")
-                                    .color(pal.text_secondary),
+                                RichText::new(
+                                    "Import a wall photo to orient, rectify 4-corner perspective, calibrate scale with exact dimensions, and trace openings.",
+                                )
+                                .color(pal.text_secondary),
                             );
                         }
                     }
                 }
                 RibbonTab::Annotate => {
-                    ribbon_group(ui, pal, "Dimensions", |ui| {
-                        let mut d = draw_dim_mode;
-                        if ui.toggle_value(&mut d, "Draw Dimension").changed() {
-                            actions.push(RibbonAction::ToggleDrawDimension(d));
+                    ribbon_group(ui, pal, "Associative Dimensions", |ui| {
+                        if ribbon_tile(
+                            ui,
+                            pal,
+                            VectorIcon::Ruler,
+                            "Draw Dim",
+                            draw_dim_mode,
+                            true,
+                        )
+                        .on_hover_text(
+                            "Click any wall or opening edges/corners to add live linked dimensions (double-click any dimension to drive size)",
+                        )
+                        .clicked()
+                        {
+                            actions.push(RibbonAction::ToggleDrawDimension(!draw_dim_mode));
                         }
-                        if ui.button("Auto-Dimension Wall").clicked() {
+                        if ribbon_tile(ui, pal, VectorIcon::AutoDim, "Auto-Dim", false, true)
+                            .clicked()
+                        {
                             actions.push(RibbonAction::AutoDimensionWall);
                         }
-                        if ui.button("Clear All").clicked() {
+                        if ribbon_tile(ui, pal, VectorIcon::Trash, "Clear Dims", false, true)
+                            .clicked()
+                        {
                             actions.push(RibbonAction::ClearDimensions);
                         }
                     });
                     ui.separator();
-                    ribbon_group(ui, pal, "Canvas Guides", |ui| {
+                    ribbon_group(ui, pal, "Blueprint Guides", |ui| {
                         let mut g = show_grid;
-                        if ui.checkbox(&mut g, "Grid").changed() {
+                        if ribbon_pill_btn(ui, pal, VectorIcon::Grid, "Grid", g, true).clicked() {
+                            g = !g;
                             actions.push(RibbonAction::ToggleGrid(g));
                         }
                         let mut r = show_rulers;
-                        if ui.checkbox(&mut r, "Rulers").changed() {
+                        if ribbon_pill_btn(ui, pal, VectorIcon::Scale, "Rulers", r, true).clicked()
+                        {
+                            r = !r;
                             actions.push(RibbonAction::ToggleRulers(r));
+                        }
+                        if ribbon_pill_btn(
+                            ui,
+                            pal,
+                            VectorIcon::Architrave,
+                            "Architraves",
+                            show_architraves,
+                            true,
+                        )
+                        .clicked()
+                        {
+                            actions.push(RibbonAction::ToggleArchitraves(!show_architraves));
                         }
                     });
                 }
                 RibbonTab::View => {
-                    ribbon_group(ui, pal, "Camera Presets", |ui| {
+                    ribbon_group(ui, pal, "3D Camera", |ui| {
                         for (preset, lbl) in [
                             (CameraPreset::Isometric, "Iso"),
-                            (CameraPreset::Front, "Front"),
-                            (CameraPreset::Back, "Back"),
+                            (CameraPreset::Front, "Ext Front"),
+                            (CameraPreset::Back, "Int Back"),
                             (CameraPreset::Left, "Left"),
                             (CameraPreset::Right, "Right"),
                             (CameraPreset::Top, "Top"),
                         ] {
-                            if ui.small_button(lbl).clicked() {
+                            if ribbon_pill_btn(ui, pal, VectorIcon::Camera, lbl, false, true)
+                                .clicked()
+                            {
                                 actions.push(RibbonAction::CameraPreset(preset));
                             }
                         }
-                        if ui.small_button("Reset").clicked() {
+                        if ribbon_pill_btn(ui, pal, VectorIcon::FitView, "Reset", false, true)
+                            .clicked()
+                        {
                             actions.push(RibbonAction::ResetCamera);
                         }
                     });
                     ui.separator();
-                    if is_multi && viewport == ActiveViewport::Wall3D {
-                        ribbon_group(ui, pal, "Wall 3D", |ui| {
-                            let mut sol = wall_solid;
-                            if ui.checkbox(&mut sol, "Solid Wall Cutaway").changed() {
-                                actions.push(RibbonAction::SetWallSolid(sol));
+                    if is_multi {
+                        ribbon_group(ui, pal, "Overlays", |ui| {
+                            if ribbon_pill_btn(
+                                ui,
+                                pal,
+                                VectorIcon::Architrave,
+                                "Architraves",
+                                show_architraves,
+                                true,
+                            )
+                            .clicked()
+                            {
+                                actions.push(RibbonAction::ToggleArchitraves(!show_architraves));
+                            }
+                            if viewport == ActiveViewport::Wall3D {
+                                let mut sol = wall_solid;
+                                if ui.checkbox(&mut sol, "Solid Wall").changed() {
+                                    actions.push(RibbonAction::SetWallSolid(sol));
+                                }
                             }
                         });
                         ui.separator();
                     }
-                    ribbon_group(ui, pal, "Piece 3D Sandwich", |ui| {
+                    ribbon_group(ui, pal, "Piece 3D Assembly", |ui| {
                         for vm in ViewMode::ALL {
                             if ui
                                 .selectable_label(view3d.view_mode == vm, vm.short_label())
@@ -649,36 +879,81 @@ pub fn draw_top_ribbon(
                         }
                     });
                     ui.separator();
-                    let mut wf = view3d.show_wireframe;
-                    if ui.checkbox(&mut wf, "Wire").changed() {
-                        actions.push(RibbonAction::SetWireframe(wf));
+                    if ribbon_pill_btn(
+                        ui,
+                        pal,
+                        VectorIcon::Wireframe,
+                        "Wire",
+                        view3d.show_wireframe,
+                        true,
+                    )
+                    .clicked()
+                    {
+                        actions.push(RibbonAction::SetWireframe(!view3d.show_wireframe));
                     }
-                    let mut ov = view3d.highlight_overhangs;
-                    if ui.checkbox(&mut ov, "Overhangs").changed() {
-                        actions.push(RibbonAction::SetHighlightOverhangs(ov));
+                    if ribbon_pill_btn(
+                        ui,
+                        pal,
+                        VectorIcon::Overhang,
+                        "Overhangs",
+                        view3d.highlight_overhangs,
+                        true,
+                    )
+                    .clicked()
+                    {
+                        actions.push(RibbonAction::SetHighlightOverhangs(
+                            !view3d.highlight_overhangs,
+                        ));
                     }
                 }
                 RibbonTab::Export => {
                     ribbon_group(ui, pal, "1:1 Scale PDFs", |ui| {
-                        if ribbon_icon_button(ui, pal, VectorIcon::ExportPdf, "PDF Booklet...") {
+                        if ribbon_tile(ui, pal, VectorIcon::ExportPdf, "Booklet PDF", false, true)
+                            .clicked()
+                        {
                             actions.push(RibbonAction::ExportBookletPdf);
                         }
-                        if is_multi && ui.button("Active Wall PDF...").clicked() {
+                        if is_multi
+                            && ribbon_pill_btn(
+                                ui,
+                                pal,
+                                VectorIcon::ExportPdf,
+                                "Active Wall",
+                                false,
+                                true,
+                            )
+                            .clicked()
+                        {
                             actions.push(RibbonAction::ExportWallPdf);
                         }
-                        if ui.button("Active Piece PDF...").clicked() {
+                        if ribbon_pill_btn(
+                            ui,
+                            pal,
+                            VectorIcon::ExportPdf,
+                            "Active Piece",
+                            false,
+                            true,
+                        )
+                        .clicked()
+                        {
                             actions.push(RibbonAction::ExportPiecePdf);
                         }
                     });
                     ui.separator();
                     ribbon_group(ui, pal, "3D Print STL", |ui| {
-                        if ribbon_icon_button(ui, pal, VectorIcon::ExportStl, "Piece Plate STL") {
+                        if ribbon_tile(ui, pal, VectorIcon::ExportStl, "Piece Plate", false, true)
+                            .clicked()
+                        {
                             actions.push(RibbonAction::ExportPieceStlPlate);
                         }
-                        if ui.small_button("Ext STL").clicked() {
+                        if ribbon_pill_btn(ui, pal, VectorIcon::ExportStl, "Ext STL", false, true)
+                            .clicked()
+                        {
                             actions.push(RibbonAction::ExportPieceStlExterior);
                         }
-                        if ui.small_button("Int STL").clicked() {
+                        if ribbon_pill_btn(ui, pal, VectorIcon::ExportStl, "Int STL", false, true)
+                            .clicked()
+                        {
                             actions.push(RibbonAction::ExportPieceStlInterior);
                         }
                         egui::ComboBox::from_id_salt("ribbon_bed")
@@ -689,16 +964,36 @@ pub fn draw_top_ribbon(
                                     ui.selectable_value(&mut state.bed_preset, bp, bp.label());
                                 }
                             });
-                        if is_multi && ui.button("Pack Wall STL").clicked() {
+                        if is_multi
+                            && ribbon_pill_btn(
+                                ui,
+                                pal,
+                                VectorIcon::PackPlates,
+                                "Pack Wall",
+                                false,
+                                true,
+                            )
+                            .clicked()
+                        {
                             actions.push(RibbonAction::PackWallPlatesStl(state.bed_preset));
                         }
-                        if ui.button("Pack Project STL").clicked() {
+                        if ribbon_pill_btn(
+                            ui,
+                            pal,
+                            VectorIcon::PackPlates,
+                            "Pack Project",
+                            false,
+                            true,
+                        )
+                        .clicked()
+                        {
                             actions.push(RibbonAction::PackProjectPlatesStl(state.bed_preset));
                         }
                     });
                     ui.separator();
                     ribbon_group(ui, pal, "CAD / Laser", |ui| {
-                        if ui.button("Export 1:1 SVG...").clicked() {
+                        if ribbon_tile(ui, pal, VectorIcon::Svg, "1:1 SVG", false, true).clicked()
+                        {
                             actions.push(RibbonAction::ExportSvgCutSheet);
                         }
                     });
@@ -721,31 +1016,128 @@ fn ribbon_group(
     });
 }
 
-fn ribbon_icon_button(
+fn ribbon_tile(
     ui: &mut egui::Ui,
     pal: &StudioPalette,
     icon: VectorIcon,
     label: &str,
-) -> bool {
-    let mut clicked = false;
-    ui.horizontal(|ui| {
-        let btn = egui::Button::new(RichText::new(label).size(12.8))
-            .fill(pal.surface_panel)
-            .stroke(Stroke::new(1.0, pal.border))
-            .corner_radius(CornerRadius::same(5));
-        let resp = ui.add(btn);
-        let ir = Rect::from_min_size(
-            Pos2::new(resp.rect.left() - 2.0, resp.rect.center().y - 7.0),
-            Vec2::splat(14.0),
-        );
-        let _ = (
-            ir,
-            icon,
-            paint_icon as fn(&egui::Painter, Rect, VectorIcon, Color32),
-        );
-        if resp.clicked() {
-            clicked = true;
-        }
-    });
-    clicked
+    active: bool,
+    enabled: bool,
+) -> egui::Response {
+    let w = (label.len() as f32 * 6.5 + 22.0).max(58.0);
+    let size = Vec2::new(w, 46.0);
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, resp) = ui.allocate_exact_size(size, sense);
+
+    let bg = if !enabled {
+        pal.surface_base
+    } else if active {
+        pal.accent
+    } else if resp.hovered() {
+        pal.surface_elevated
+    } else {
+        pal.surface_panel
+    };
+    let fg = if !enabled {
+        pal.text_muted
+    } else if active {
+        pal.accent_text
+    } else {
+        pal.text_primary
+    };
+    let border = if active {
+        pal.accent
+    } else if resp.hovered() && enabled {
+        pal.border_strong
+    } else {
+        pal.border
+    };
+
+    ui.painter().rect_filled(rect, 6.0, bg);
+    ui.painter().rect_stroke(
+        rect,
+        6.0,
+        Stroke::new(1.0, border),
+        egui::StrokeKind::Inside,
+    );
+    let icon_rect = Rect::from_center_size(
+        egui::pos2(rect.center().x, rect.top() + 14.5),
+        Vec2::splat(17.0),
+    );
+    paint_icon(ui.painter(), icon_rect, icon, fg);
+    ui.painter().text(
+        egui::pos2(rect.center().x, rect.bottom() - 8.5),
+        Align2::CENTER_CENTER,
+        label,
+        egui::FontId::proportional(11.3),
+        fg,
+    );
+    resp
+}
+
+fn ribbon_pill_btn(
+    ui: &mut egui::Ui,
+    pal: &StudioPalette,
+    icon: VectorIcon,
+    label: &str,
+    active: bool,
+    enabled: bool,
+) -> egui::Response {
+    let w = (label.len() as f32 * 6.8 + 30.0).max(52.0);
+    let size = Vec2::new(w, 25.0);
+    let sense = if enabled {
+        Sense::click()
+    } else {
+        Sense::hover()
+    };
+    let (rect, resp) = ui.allocate_exact_size(size, sense);
+
+    let bg = if !enabled {
+        pal.surface_base
+    } else if active {
+        pal.accent
+    } else if resp.hovered() {
+        pal.surface_elevated
+    } else {
+        pal.surface_panel
+    };
+    let fg = if !enabled {
+        pal.text_muted
+    } else if active {
+        pal.accent_text
+    } else {
+        pal.text_primary
+    };
+    let border = if active {
+        pal.accent
+    } else if resp.hovered() && enabled {
+        pal.border_strong
+    } else {
+        pal.border
+    };
+
+    ui.painter().rect_filled(rect, 5.0, bg);
+    ui.painter().rect_stroke(
+        rect,
+        5.0,
+        Stroke::new(1.0, border),
+        egui::StrokeKind::Inside,
+    );
+    let icon_rect = Rect::from_center_size(
+        egui::pos2(rect.left() + 12.0, rect.center().y),
+        Vec2::splat(14.0),
+    );
+    paint_icon(ui.painter(), icon_rect, icon, fg);
+    ui.painter().text(
+        egui::pos2(rect.left() + 22.0, rect.center().y),
+        Align2::LEFT_CENTER,
+        label,
+        egui::FontId::proportional(12.2),
+        fg,
+    );
+    resp
 }

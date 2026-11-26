@@ -116,6 +116,10 @@ struct GlPipeline {
     uploaded_version: u64,
 }
 
+pub fn stand_front() -> Mat4 {
+    Mat4::from_rotation_x(FRAC_PI_2) * Mat4::from_rotation_y(std::f32::consts::PI)
+}
+
 /// Thread-safe holder shared between the UI and the `egui_glow` paint callback.
 pub struct Viewport3DState {
     pub camera: OrbitCamera,
@@ -377,7 +381,7 @@ fn render_gl(gl: &glow::Context, info: &egui::PaintCallbackInfo, st: &mut Viewpo
             gl.draw_arrays(glow::LINES, 0, pipeline.grid_vertex_count);
         }
 
-        let stand_upright = Mat4::from_rotation_x(FRAC_PI_2);
+        let stand_upright = stand_front();
         let flip_y = Mat4::from_rotation_y(std::f32::consts::PI);
         let total_assembled_z = (params.trim_thickness
             + specs.effective_wall_thickness
@@ -899,7 +903,8 @@ fn render_project_wall_gl(
         let wall_w = built_wall.wall.width as f32;
         let wall_h = built_wall.wall.height as f32;
         let wall_t = built_wall.wall.wall_thickness as f32;
-        let stand_upright = Mat4::from_rotation_x(FRAC_PI_2);
+        let stand_wall = Mat4::from_rotation_x(FRAC_PI_2);
+        let stand_op = stand_front();
         let flip_y = Mat4::from_rotation_y(std::f32::consts::PI);
 
         if settings.show_grid {
@@ -980,7 +985,7 @@ fn render_project_wall_gl(
         let wall_z_shift = -wall_t * 0.5;
         let use_tex_on_wall = photo_show_3d && pipeline.wall_photo_tex.is_some();
         if wall_solid && let Some(wm) = &pipeline.project_wall_gpu {
-            let m_wall = stand_upright * Mat4::from_translation(Vec3::new(0.0, 0.0, wall_z_shift));
+            let m_wall = stand_wall * Mat4::from_translation(Vec3::new(0.0, 0.0, wall_z_shift));
             draw_gpu(
                 wm,
                 m_wall,
@@ -1006,6 +1011,7 @@ fn render_project_wall_gl(
             let ext_col = highlight_color(ext_base, is_sel, is_hov);
             let int_col = highlight_color(int_base, is_sel, is_hov);
 
+            let place_at = Mat4::from_translation(Vec3::new(*cx, 0.0, *cy)) * stand_op;
             let op_z0 = wall_z_shift - win_gen.params.trim_thickness as f32;
             let op_int_z = if win_gen.is_door {
                 op_z0
@@ -1020,12 +1026,12 @@ fn render_project_wall_gl(
             };
 
             if let Some(m) = &op_gpu.ext_gpu {
-                let model = stand_upright * Mat4::from_translation(Vec3::new(*cx, *cy, op_z0));
+                let model = place_at * Mat4::from_translation(Vec3::new(0.0, 0.0, op_z0));
                 draw_gpu(m, model, ext_col, 1.0, settings.show_wireframe, false);
             }
             if let Some(m) = &op_gpu.int_gpu {
                 let model =
-                    stand_upright * Mat4::from_translation(Vec3::new(*cx, *cy, op_int_z)) * flip_y;
+                    place_at * Mat4::from_translation(Vec3::new(0.0, 0.0, op_int_z)) * flip_y;
                 draw_gpu(m, model, int_col, 1.0, settings.show_wireframe, false);
             }
 
@@ -1038,17 +1044,17 @@ fn render_project_wall_gl(
 
                 for (l_idx, lg) in op_gpu.leaf_gpus.iter().enumerate() {
                     let meta = &win_gen.door_leaves[l_idx];
-                    let px = *cx + meta.assembled_x_offset + meta.pivot_x;
+                    let px = meta.assembled_x_offset + meta.pivot_x;
                     let pz = z_leaf_int - meta.pivot_z;
-                    let swing = Mat4::from_translation(Vec3::new(px, *cy, pz))
+                    let swing = Mat4::from_translation(Vec3::new(px, 0.0, pz))
                         * Mat4::from_rotation_y(-open_rad * meta.swing_dir)
-                        * Mat4::from_translation(Vec3::new(-px, -*cy, -pz));
+                        * Mat4::from_translation(Vec3::new(-px, 0.0, -pz));
 
-                    let leaf_model = stand_upright
+                    let leaf_model = place_at
                         * swing
                         * Mat4::from_translation(Vec3::new(
-                            *cx + meta.assembled_x_offset,
-                            *cy,
+                            meta.assembled_x_offset,
+                            0.0,
                             z_leaf_int,
                         ))
                         * flip_y;
@@ -1062,20 +1068,20 @@ fn render_project_wall_gl(
                     );
 
                     if let Some(ext_l) = &lg.ext_gpu {
-                        let m_ext_l = stand_upright
+                        let m_ext_l = place_at
                             * swing
                             * Mat4::from_translation(Vec3::new(
-                                *cx + meta.assembled_x_offset,
-                                *cy,
+                                meta.assembled_x_offset,
+                                0.0,
                                 z_leaf_int - meta.leaf_thickness,
                             ));
                         draw_gpu(ext_l, m_ext_l, ext_col, 1.0, settings.show_wireframe, false);
                     }
-                    let hw_model = stand_upright
+                    let hw_model = place_at
                         * swing
                         * Mat4::from_translation(Vec3::new(
-                            *cx + meta.assembled_x_offset,
-                            *cy,
+                            meta.assembled_x_offset,
+                            0.0,
                             z_leaf_int,
                         ));
                     if let Some(hm) = &lg.hardware_gpu {
@@ -1086,7 +1092,7 @@ fn render_project_wall_gl(
                     }
                 }
             } else if !op_gpu.sash_gpus.is_empty() {
-                let m_op_ext = stand_upright * Mat4::from_translation(Vec3::new(*cx, *cy, op_z0));
+                let m_op_ext = place_at * Mat4::from_translation(Vec3::new(0.0, 0.0, op_z0));
                 let sash_col = [
                     (ext_col[0] * 0.90 + 0.08).min(1.0),
                     (ext_col[1] * 0.90 + 0.07).min(1.0),
@@ -1120,6 +1126,7 @@ fn render_project_wall_gl(
             let Some((_, cx, cy, win_gen)) = built_wall.placed_openings.get(idx) else {
                 continue;
             };
+            let place_at = Mat4::from_translation(Vec3::new(*cx, 0.0, *cy)) * stand_op;
             let op_z0 = wall_z_shift - win_gen.params.trim_thickness as f32;
             if win_gen.is_door {
                 let z_leaf_int = op_z0
@@ -1129,16 +1136,16 @@ fn render_project_wall_gl(
                 for (l_idx, lg) in op_gpu.leaf_gpus.iter().enumerate() {
                     if let Some(ac_m) = &lg.ac_gpu {
                         let meta = &win_gen.door_leaves[l_idx];
-                        let px = *cx + meta.assembled_x_offset + meta.pivot_x;
+                        let px = meta.assembled_x_offset + meta.pivot_x;
                         let pz = z_leaf_int - meta.pivot_z;
-                        let swing = Mat4::from_translation(Vec3::new(px, *cy, pz))
+                        let swing = Mat4::from_translation(Vec3::new(px, 0.0, pz))
                             * Mat4::from_rotation_y(-open_rad * meta.swing_dir)
-                            * Mat4::from_translation(Vec3::new(-px, -*cy, -pz));
-                        let m_ac = stand_upright
+                            * Mat4::from_translation(Vec3::new(-px, 0.0, -pz));
+                        let m_ac = place_at
                             * swing
                             * Mat4::from_translation(Vec3::new(
-                                *cx + meta.assembled_x_offset,
-                                *cy,
+                                meta.assembled_x_offset,
+                                0.0,
                                 z_leaf_int
                                     - meta.leaf_thickness * 0.5
                                     - win_gen.params.acetate_thickness as f32 * 0.5,
@@ -1147,7 +1154,7 @@ fn render_project_wall_gl(
                     }
                 }
             } else if !op_gpu.sash_gpus.is_empty() {
-                let m_op_ext = stand_upright * Mat4::from_translation(Vec3::new(*cx, *cy, op_z0));
+                let m_op_ext = place_at * Mat4::from_translation(Vec3::new(0.0, 0.0, op_z0));
                 let sash_t = (win_gen.params.trim_thickness + 1.2)
                     .clamp(3.6, win_gen.specs.ext_seat_z.clamp(3.6, 4.6))
                     as f32;
@@ -1167,10 +1174,10 @@ fn render_project_wall_gl(
                     }
                 }
             } else if let Some(ac_m) = &op_gpu.ac_gpu {
-                let m_ac = stand_upright
+                let m_ac = place_at
                     * Mat4::from_translation(Vec3::new(
-                        *cx,
-                        *cy,
+                        0.0,
+                        0.0,
                         op_z0 + win_gen.specs.ext_seat_z as f32,
                     ));
                 draw_gpu(ac_m, m_ac, [0.42, 0.78, 0.96], 0.42, false, false);
@@ -1178,7 +1185,7 @@ fn render_project_wall_gl(
         }
 
         if !wall_solid && let Some(wm) = &pipeline.project_wall_gpu {
-            let m_wall = stand_upright * Mat4::from_translation(Vec3::new(0.0, 0.0, wall_z_shift));
+            let m_wall = stand_wall * Mat4::from_translation(Vec3::new(0.0, 0.0, wall_z_shift));
             draw_gpu(wm, m_wall, wall_mesh_col, 0.28, false, use_tex_on_wall);
         }
 
@@ -1247,7 +1254,7 @@ impl GlPipeline {
                 float spec = pow(max(dot(n, h), 0.0), 36.0) * 0.25;
 
                 vec3 base = u_color;
-                if (u_use_wall_tex == 1) {
+                if (u_use_wall_tex == 1 && n.y < -0.5) {
                     float wx = v_local_xy.x + u_wall_size.x * 0.5;
                     float wy = v_local_xy.y + u_wall_size.y * 0.5;
                     float u = (wx - u_photo_bounds.x) / max(u_photo_bounds.z, 1.0);

@@ -1,5 +1,6 @@
 use crate::canvas2d::{
-    Blueprint2DState, BlueprintAction, draw_blueprint_2d, quick_bar::QuickBarAction,
+    Blueprint2DState, BlueprintAction, PhotoCanvasTool, draw_blueprint_2d,
+    quick_bar::QuickBarAction,
 };
 use crate::explorer::{ExplorerAction, draw_project_explorer};
 use crate::inspector::{
@@ -11,9 +12,9 @@ use crate::ribbon::{ActiveViewport, RibbonAction, RibbonState, draw_top_ribbon};
 use crate::theme::{StudioPalette, apply_studio_theme};
 use crate::welcome::{WelcomeAction, WelcomeState, draw_welcome_hub};
 use crate::wizards::{
-    NewProjectWizardState, PdfExportModalState, PdfExportScope, PhotoWizardState,
-    SaveTemplateModalState, draw_new_project_wizard, draw_pdf_export_wizard,
-    draw_photo_setup_wizard, draw_save_template_modal,
+    NewProjectWizardState, OnboardingOutcome, OnboardingState, PdfExportModalState, PdfExportScope,
+    PhotoWizardState, SaveTemplateModalState, draw_new_project_wizard, draw_onboarding_tour,
+    draw_pdf_export_wizard, draw_photo_setup_wizard, draw_save_template_modal,
 };
 use dh_core::{
     ComponentDef, DisplayUnit, OpeningSource, PieceTemplate, Project, ProjectKind, StandalonePiece,
@@ -37,12 +38,6 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ScreenMode {
-    WelcomeHub,
-    Editor,
-}
-
 #[derive(Debug, Clone)]
 struct CrashRecoveryPrompt {
     project_dir: PathBuf,
@@ -58,7 +53,7 @@ struct ToastNotice {
 }
 
 pub struct DollhouseStudioApp {
-    pub screen: ScreenMode,
+    pub show_hub_overlay: bool,
     pub prefs: AppPreferences,
     pub palette: StudioPalette,
     pub personal_templates: Vec<PieceTemplate>,
@@ -81,6 +76,7 @@ pub struct DollhouseStudioApp {
     pub inspector_state: InspectorState,
 
     pub new_project_wizard: NewProjectWizardState,
+    pub onboarding: OnboardingState,
     pub save_template_modal: SaveTemplateModalState,
     pub pdf_export_modal: PdfExportModalState,
     pub photo_wizard: PhotoWizardState,
@@ -122,9 +118,10 @@ impl DollhouseStudioApp {
         let undo = UndoHistory::new(project.clone());
         let unit = prefs.display_unit;
         let last_root = prefs.last_projects_root.clone();
+        let onboarding_open = !prefs.has_seen_onboarding;
 
         Self {
-            screen: ScreenMode::WelcomeHub,
+            show_hub_overlay: true,
             palette: StudioPalette::for_mode(prefs.theme == ThemeMode::Dark),
             prefs,
             personal_templates,
@@ -143,6 +140,10 @@ impl DollhouseStudioApp {
             canvas2d: Blueprint2DState::new(),
             inspector_state: InspectorState::default(),
             new_project_wizard: NewProjectWizardState::closed(unit, last_root),
+            onboarding: OnboardingState {
+                open: onboarding_open,
+                ..OnboardingState::default()
+            },
             save_template_modal: SaveTemplateModalState::default(),
             pdf_export_modal: PdfExportModalState::default(),
             photo_wizard: PhotoWizardState::default(),
@@ -168,7 +169,8 @@ impl DollhouseStudioApp {
         app.project_dir = dir;
         app.dirty = false;
         app.undo.reset(project);
-        app.screen = ScreenMode::Editor;
+        app.show_hub_overlay = false;
+        app.onboarding.open = false;
         app.viewport = match app.project.manifest.kind {
             ProjectKind::SinglePiece => ActiveViewport::Piece3D,
             ProjectKind::MultiWall => ActiveViewport::Blueprint2D,
@@ -185,6 +187,10 @@ impl DollhouseStudioApp {
     }
 
     fn commit_undo(&mut self, label: impl Into<String>) {
+        let comps = self.project.components.clone();
+        for wall in &mut self.project.walls {
+            wall.sync_anchored_dimensions(&comps);
+        }
         self.project.ensure_valid_selection();
         self.undo.commit(label, self.project.clone());
         self.dirty = true;
@@ -237,7 +243,7 @@ impl DollhouseStudioApp {
         self.project_dir = dir;
         self.dirty = false;
         self.undo.reset(project);
-        self.screen = ScreenMode::Editor;
+        self.show_hub_overlay = false;
     }
 
     fn save_current_project(&mut self) {
@@ -306,7 +312,7 @@ impl DollhouseStudioApp {
     }
 
     fn active_unit(&self) -> DisplayUnit {
-        if self.screen == ScreenMode::Editor {
+        if !self.show_hub_overlay {
             self.project.manifest.display_unit
         } else {
             self.prefs.display_unit
@@ -357,6 +363,17 @@ impl DollhouseStudioApp {
                         fast_preview,
                     ) {
                         photo_ver = gpu.version;
+                    }
+                    if self.canvas2d.edit_photo_mode
+                        && self.canvas2d.photo.tool == PhotoCanvasTool::PerspectivePins
+                    {
+                        self.photo_cache.ensure_oriented_loaded(
+                            ctx,
+                            self.project_dir.as_deref(),
+                            photo_asset.as_deref(),
+                            wall.photo.rotation_deg,
+                            fast_preview,
+                        );
                     }
                 } else {
                     self.photo_cache.clear();
@@ -548,6 +565,7 @@ impl DollhouseStudioApp {
             if let Some(op) = wall.openings.iter_mut().find(|o| o.id == opening_id) {
                 op.clamp_to_wall(ww, wh, &comps);
             }
+            wall.sync_anchored_dimensions(&comps);
         }
     }
 
@@ -589,7 +607,11 @@ impl DollhouseStudioApp {
     }
 
     fn handle_shortcuts(&mut self, ctx: &egui::Context) {
-        if self.screen != ScreenMode::Editor {
+        if self.show_hub_overlay
+            || self.onboarding.open
+            || self.photo_wizard.open
+            || self.new_project_wizard.open
+        {
             return;
         }
         let typing = ctx.egui_wants_keyboard_input();
@@ -861,7 +883,7 @@ impl DollhouseStudioApp {
         }
 
         // Silent periodic .autosave every 45s while dirty
-        if self.screen == ScreenMode::Editor
+        if !self.show_hub_overlay
             && self.dirty
             && self.project_dir.is_some()
             && self.last_autosave_at.elapsed() >= Duration::from_secs(45)
@@ -871,172 +893,185 @@ impl DollhouseStudioApp {
             self.last_autosave_at = Instant::now();
         }
 
-        if self.screen == ScreenMode::WelcomeHub {
-            egui::CentralPanel::default().show(ui, |ui| {
-                if let Some(act) = draw_welcome_hub(
+        // Always render live workspace behind floating Hub & onboarding overlays.
+        self.handle_shortcuts(&ctx);
+        self.process_3d_events();
+        self.sync_3d_viewport(&ctx);
+
+        // 1) Top Ribbon
+        let ribbon_actions = egui::Panel::top("studio_top_ribbon")
+            .resizable(false)
+            .show(ui, |ui| {
+                let (view_settings, wall_solid) = {
+                    let st = self.viewport3d.lock().unwrap();
+                    (st.settings.clone(), st.wall_solid)
+                };
+                draw_top_ribbon(
                     ui,
                     &pal,
-                    &self.prefs,
+                    &self.project,
+                    self.project_dir.is_some(),
+                    self.dirty,
+                    &self.undo,
+                    self.project.manifest.display_unit,
+                    self.prefs.theme,
+                    self.viewport,
+                    self.selected_opening_ids.len(),
+                    self.canvas2d.edit_photo_mode,
+                    self.canvas2d.photo.tool,
+                    self.canvas2d.dims.active_draw_mode,
+                    self.canvas2d.show_grid,
+                    self.canvas2d.show_rulers,
+                    self.canvas2d.show_architrave_outlines,
+                    &view_settings,
+                    wall_solid,
+                    &mut self.ribbon_state,
+                )
+            })
+            .inner;
+        self.handle_ribbon_actions(ribbon_actions);
+
+        // 2) Left CAD Explorer
+        let explorer_resp = egui::Panel::left("studio_explorer")
+            .resizable(false)
+            .exact_size(256.0)
+            .show(ui, |ui| {
+                draw_project_explorer(
+                    ui,
+                    &pal,
+                    &self.project,
+                    self.active_component_id.as_deref(),
+                    &self.selected_opening_ids,
                     &self.personal_templates,
                     &self.starter_templates,
-                    &mut self.welcome_state,
-                ) {
-                    self.handle_welcome_action(act);
-                }
+                    self.project.manifest.display_unit,
+                )
             });
-        } else {
-            self.handle_shortcuts(&ctx);
-            self.process_3d_events();
-            self.sync_3d_viewport(&ctx);
+        self.last_explorer_width = explorer_resp.response.rect.width();
+        self.handle_explorer_actions(explorer_resp.inner);
 
-            // 1) Top Ribbon
-            let ribbon_actions = egui::Panel::top("studio_top_ribbon")
-                .resizable(false)
-                .show(ui, |ui| {
-                    let (view_settings, wall_solid) = {
-                        let st = self.viewport3d.lock().unwrap();
-                        (st.settings.clone(), st.wall_solid)
-                    };
-                    draw_top_ribbon(
-                        ui,
-                        &pal,
-                        &self.project,
-                        self.dirty,
-                        &self.undo,
-                        self.project.manifest.display_unit,
-                        self.prefs.theme,
-                        self.viewport,
-                        self.selected_opening_ids.len(),
-                        self.canvas2d.edit_photo_mode,
-                        self.canvas2d.photo.tool,
-                        self.canvas2d.dims.active_draw_mode,
-                        self.canvas2d.show_grid,
-                        self.canvas2d.show_rulers,
-                        &view_settings,
-                        wall_solid,
-                        &mut self.ribbon_state,
-                    )
-                })
-                .inner;
-            self.handle_ribbon_actions(ribbon_actions);
-
-            // 2) Left CAD Explorer
-            let explorer_resp = egui::Panel::left("studio_explorer")
-                .resizable(false)
-                .exact_size(256.0)
-                .show(ui, |ui| {
-                    draw_project_explorer(
-                        ui,
-                        &pal,
-                        &self.project,
-                        self.active_component_id.as_deref(),
-                        &self.selected_opening_ids,
-                        &self.personal_templates,
-                        &self.starter_templates,
-                        self.project.manifest.display_unit,
-                    )
-                });
-            self.last_explorer_width = explorer_resp.response.rect.width();
-            self.handle_explorer_actions(explorer_resp.inner);
-
-            // 3) Right Contextual Inspector
-            let insp_resp = egui::Panel::right("studio_inspector")
-                .resizable(false)
-                .exact_size(326.0)
-                .show(ui, |ui| {
-                    let unit = self.project.manifest.display_unit;
-                    let (mut ext_col, mut door_col) = {
-                        let st = self.viewport3d.lock().unwrap();
-                        (st.settings.filament_color, st.settings.door_color)
-                    };
-
-                    let res = match self.project.manifest.kind {
-                        ProjectKind::SinglePiece => {
-                            if let Some(piece) = self.project.active_piece_mut() {
-                                draw_standalone_piece_inspector(
-                                    ui,
-                                    &pal,
-                                    piece,
-                                    unit,
-                                    &mut ext_col,
-                                    &mut door_col,
-                                )
-                            } else {
-                                InspectorResult::default()
-                            }
-                        }
-                        ProjectKind::MultiWall => {
-                            let Some(wid) = self.project.manifest.active_wall_id.clone() else {
-                                return InspectorResult::default();
-                            };
-                            let w_idx = self.project.walls.iter().position(|w| w.id == wid);
-                            if let Some(idx) = w_idx {
-                                let wall = &mut self.project.walls[idx];
-                                let comps = &mut self.project.components;
-                                draw_wall_inspector(
-                                    ui,
-                                    &pal,
-                                    wall,
-                                    comps,
-                                    &self.selected_opening_ids,
-                                    self.active_component_id.as_deref(),
-                                    unit,
-                                    &mut ext_col,
-                                    &mut door_col,
-                                    &mut self.inspector_state,
-                                )
-                            } else {
-                                InspectorResult::default()
-                            }
-                        }
-                    };
-
-                    {
-                        let mut st = self.viewport3d.lock().unwrap();
-                        st.settings.filament_color = ext_col;
-                        st.settings.door_color = door_col;
-                    }
-                    res
-                });
-            self.last_inspector_width = insp_resp.response.rect.width();
-            self.handle_inspector_result(insp_resp.inner);
-
-            // 4) Central Canvas (Blueprint 2D / Wall 3D / Piece 3D)
-            egui::CentralPanel::default().show(ui, |ui| {
-                let effective_vp = if self.project.manifest.kind == ProjectKind::SinglePiece {
-                    ActiveViewport::Piece3D
-                } else {
-                    self.viewport
+        // 3) Right Contextual Inspector
+        let insp_resp = egui::Panel::right("studio_inspector")
+            .resizable(false)
+            .exact_size(326.0)
+            .show(ui, |ui| {
+                let unit = self.project.manifest.display_unit;
+                let (mut ext_col, mut door_col) = {
+                    let st = self.viewport3d.lock().unwrap();
+                    (st.settings.filament_color, st.settings.door_color)
                 };
 
-                match effective_vp {
-                    ActiveViewport::Blueprint2D => {
-                        let unit = self.project.manifest.display_unit;
-                        let Some(wid) = self.project.manifest.active_wall_id.clone() else {
-                            return;
-                        };
-                        if let Some(idx) = self.project.walls.iter().position(|w| w.id == wid) {
-                            let comps = self.project.components.clone();
-                            let actions = draw_blueprint_2d(
+                let res = match self.project.manifest.kind {
+                    ProjectKind::SinglePiece => {
+                        if let Some(piece) = self.project.active_piece_mut() {
+                            draw_standalone_piece_inspector(
                                 ui,
                                 &pal,
-                                &mut self.project.walls[idx],
-                                &comps,
-                                &self.selected_opening_ids,
+                                piece,
                                 unit,
-                                &self.photo_cache,
-                                &mut self.canvas2d,
-                            );
-                            self.handle_blueprint_actions(actions);
+                                &mut ext_col,
+                                &mut door_col,
+                            )
+                        } else {
+                            InspectorResult::default()
                         }
                     }
-                    ActiveViewport::Wall3D | ActiveViewport::Piece3D => {
-                        draw_viewport(ui, Arc::clone(&self.viewport3d));
+                    ProjectKind::MultiWall => {
+                        let Some(wid) = self.project.manifest.active_wall_id.clone() else {
+                            return InspectorResult::default();
+                        };
+                        let w_idx = self.project.walls.iter().position(|w| w.id == wid);
+                        if let Some(idx) = w_idx {
+                            let wall = &mut self.project.walls[idx];
+                            let comps = &mut self.project.components;
+                            draw_wall_inspector(
+                                ui,
+                                &pal,
+                                wall,
+                                comps,
+                                &self.selected_opening_ids,
+                                self.active_component_id.as_deref(),
+                                unit,
+                                &mut ext_col,
+                                &mut door_col,
+                                &mut self.inspector_state,
+                            )
+                        } else {
+                            InspectorResult::default()
+                        }
+                    }
+                };
+
+                {
+                    let mut st = self.viewport3d.lock().unwrap();
+                    st.settings.filament_color = ext_col;
+                    st.settings.door_color = door_col;
+                }
+                res
+            });
+        self.last_inspector_width = insp_resp.response.rect.width();
+        self.handle_inspector_result(insp_resp.inner);
+
+        // 4) Central Canvas (Blueprint 2D / Wall 3D / Piece 3D)
+        egui::CentralPanel::default().show(ui, |ui| {
+            let effective_vp = if self.project.manifest.kind == ProjectKind::SinglePiece {
+                ActiveViewport::Piece3D
+            } else {
+                self.viewport
+            };
+
+            match effective_vp {
+                ActiveViewport::Blueprint2D => {
+                    let unit = self.project.manifest.display_unit;
+                    let Some(wid) = self.project.manifest.active_wall_id.clone() else {
+                        return;
+                    };
+                    if let Some(idx) = self.project.walls.iter().position(|w| w.id == wid) {
+                        let comps = self.project.components.clone();
+                        let actions = draw_blueprint_2d(
+                            ui,
+                            &pal,
+                            &mut self.project.walls[idx],
+                            &comps,
+                            &self.selected_opening_ids,
+                            unit,
+                            &self.photo_cache,
+                            &mut self.canvas2d,
+                        );
+                        self.handle_blueprint_actions(actions);
                     }
                 }
-            });
+                ActiveViewport::Wall3D | ActiveViewport::Piece3D => {
+                    draw_viewport(ui, Arc::clone(&self.viewport3d));
+                }
+            }
+        });
 
-            self.flush_pending_undo(&ctx);
+        self.flush_pending_undo(&ctx);
+
+        // Floating Project & Template Hub overlay (non-destructive over live studio workspace).
+        if self.show_hub_overlay
+            && !self.new_project_wizard.open
+            && !self.onboarding.open
+            && let Some(act) = draw_welcome_hub(
+                &ctx,
+                &pal,
+                &self.prefs,
+                &self.personal_templates,
+                &self.starter_templates,
+                &mut self.welcome_state,
+            )
+        {
+            self.handle_welcome_action(act);
+        }
+
+        // Skippable 4-step Onboarding Quick Tour
+        if let Some(OnboardingOutcome::Dismissed { remember_seen }) =
+            draw_onboarding_tour(&ctx, &pal, &mut self.onboarding)
+            && remember_seen
+        {
+            self.prefs.has_seen_onboarding = true;
+            self.save_preferences();
         }
 
         // Floating Wizards & Modals
@@ -1106,7 +1141,7 @@ impl DollhouseStudioApp {
                 .find(|w| w.id == self.photo_wizard.wall_id)
                 .cloned()
             {
-                if let Some((cfg, open_canvas_handles)) = draw_photo_setup_wizard(
+                if let Some((cfg, open_canvas_handles, opt_wall_size)) = draw_photo_setup_wizard(
                     &ctx,
                     &pal,
                     self.project_dir.as_deref(),
@@ -1115,9 +1150,19 @@ impl DollhouseStudioApp {
                     self.project.manifest.display_unit,
                     &mut self.wizard_photo_cache,
                     &mut self.photo_wizard,
-                ) && let Some(w_mut) = self.project.walls.iter_mut().find(|w| w.id == wall.id)
-                {
-                    w_mut.photo = cfg;
+                ) {
+                    let comps = self.project.components.clone();
+                    if let Some(w_mut) = self.project.walls.iter_mut().find(|w| w.id == wall.id) {
+                        w_mut.photo = cfg;
+                        if let Some((nw, nh)) = opt_wall_size {
+                            w_mut.width = nw;
+                            w_mut.height = nh;
+                            for op in &mut w_mut.openings {
+                                op.clamp_to_wall(nw, nh, &comps);
+                            }
+                            self.canvas2d.fitted_wall_id = None;
+                        }
+                    }
                     self.canvas2d.edit_photo_mode = open_canvas_handles;
                     self.commit_undo("Calibrate wall photo");
                 }
@@ -1194,8 +1239,31 @@ impl DollhouseStudioApp {
         }
     }
 
+    fn open_project_dir_in_os(&mut self) {
+        let Some(ref dir) = self.project_dir else {
+            self.show_toast("Save the project first to create its folder on disk.", true);
+            return;
+        };
+        #[cfg(target_os = "windows")]
+        let res = std::process::Command::new("explorer").arg(dir).spawn();
+        #[cfg(target_os = "macos")]
+        let res = std::process::Command::new("open").arg(dir).spawn();
+        #[cfg(not(any(target_os = "windows", target_os = "macos")))]
+        let res = std::process::Command::new("xdg-open").arg(dir).spawn();
+
+        if let Err(e) = res {
+            self.show_toast(format!("Could not open folder: {e}"), true);
+        }
+    }
+
     fn handle_welcome_action(&mut self, act: WelcomeAction) {
         match act {
+            WelcomeAction::CloseHub => {
+                self.show_hub_overlay = false;
+            }
+            WelcomeAction::OpenGettingStartedTour => {
+                self.onboarding.open_tour();
+            }
             WelcomeAction::OpenNewProjectWizard {
                 initial_kind,
                 with_sample,
@@ -1232,6 +1300,9 @@ impl DollhouseStudioApp {
             }
             WelcomeAction::ChangeUnit(u) => {
                 self.prefs.display_unit = u;
+                if self.project_dir.is_none() && !self.dirty {
+                    self.project.manifest.display_unit = u;
+                }
                 self.save_preferences();
             }
             WelcomeAction::ImportPersonalTemplatePrompt => {
@@ -1273,8 +1344,11 @@ impl DollhouseStudioApp {
     fn handle_ribbon_actions(&mut self, actions: Vec<RibbonAction>) {
         for act in actions {
             match act {
-                RibbonAction::GoHomeHub => {
-                    self.screen = ScreenMode::WelcomeHub;
+                RibbonAction::OpenHubOverlay => {
+                    self.show_hub_overlay = true;
+                }
+                RibbonAction::OpenGettingStartedTour => {
+                    self.onboarding.open_tour();
                 }
                 RibbonAction::NewProject => {
                     self.new_project_wizard.open_with(
@@ -1293,6 +1367,9 @@ impl DollhouseStudioApp {
                     {
                         self.open_project_folder(dir);
                     }
+                }
+                RibbonAction::OpenProjectDirInOs => {
+                    self.open_project_dir_in_os();
                 }
                 RibbonAction::SaveProject => self.save_current_project(),
                 RibbonAction::PromoteToMultiWall => {
@@ -1396,6 +1473,9 @@ impl DollhouseStudioApp {
                         }
                         self.commit_undo("Snap opening to floor");
                     }
+                }
+                RibbonAction::ToggleArchitraves(v) => {
+                    self.canvas2d.show_architrave_outlines = v;
                 }
                 RibbonAction::SaveSelectionAsTemplate => self.open_save_template_for_selection(),
                 RibbonAction::MakeSelectedComponent => {
@@ -1976,6 +2056,7 @@ impl DollhouseStudioApp {
                                 op.clamp_to_wall(ww, wh, &comps);
                             }
                         }
+                        wall.sync_anchored_dimensions(&comps);
                         self.dirty = true;
                     }
                 }
@@ -2003,6 +2084,7 @@ impl DollhouseStudioApp {
                         for op in &mut wall.openings {
                             op.clamp_to_wall(wall.width, wall.height, &comps);
                         }
+                        wall.sync_anchored_dimensions(&comps);
                         self.dirty = true;
                     }
                 }
@@ -2084,6 +2166,47 @@ impl DollhouseStudioApp {
                     }
                     QuickBarAction::Delete => self.delete_selected_openings(),
                 },
+                BlueprintAction::DriveDimension { dim_id, target_mm } => {
+                    let Some(wid) = self.project.manifest.active_wall_id.clone() else {
+                        continue;
+                    };
+                    let mut comps = self.project.components.clone();
+                    let res =
+                        if let Some(wall) = self.project.walls.iter_mut().find(|w| w.id == wid) {
+                            wall.apply_driving_dimension(&dim_id, target_mm, &mut comps)
+                        } else {
+                            Err("Active wall not found".to_string())
+                        };
+                    match res {
+                        Ok(lbl) => {
+                            self.project.components = comps;
+                            self.commit_undo(lbl);
+                        }
+                        Err(msg) => self.show_toast(msg, true),
+                    }
+                }
+                BlueprintAction::ImportWallPhoto => self.trigger_import_wall_photo(),
+                BlueprintAction::AutoDimensionWall => {
+                    let comps = self.project.components.clone();
+                    if let Some(wall) = self.project.active_wall_mut() {
+                        wall.generate_auto_dimensions(&comps);
+                        self.commit_undo("Auto-dimension wall");
+                    }
+                }
+                BlueprintAction::SnapSelectedToFloor => {
+                    let ids: HashSet<String> = self.selected_opening_ids.iter().cloned().collect();
+                    if let Some(wall) = self.project.active_wall_mut() {
+                        for op in &mut wall.openings {
+                            if ids.contains(&op.id) && !op.lock_position {
+                                op.y_from_bottom = 0.0;
+                            }
+                        }
+                        self.commit_undo("Snap opening to floor");
+                    }
+                }
+                BlueprintAction::ToggleArchitraves(v) => {
+                    self.canvas2d.show_architrave_outlines = v;
+                }
                 BlueprintAction::OpenPhotoWizard => {
                     if let Some(wall) = self.project.active_wall()
                         && wall.photo.has_photo()

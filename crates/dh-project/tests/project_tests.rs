@@ -219,3 +219,38 @@ fn wall_photo_crop_rotate_homography_and_calibration_work_accurately() {
     assert!((cfg.width_mm - 640.0).abs() < 1e-6);
     assert!((cfg.height_mm - 480.0).abs() < 1e-6);
 }
+
+#[test]
+fn rotated_photo_aspect_and_perspective_operate_in_oriented_frame() {
+    // Wide 400x200 image rotated 90 deg clockwise becomes portrait ~200x400.
+    let sw = 200u32;
+    let sh = 100u32;
+    let rgba = vec![180u8; sw as usize * sh as usize * 4];
+    let (ow, oh, obuf) = dh_project::orient_photo_rgba(sw, sh, &rgba, 90.0, 1000);
+    assert_eq!(ow, 100);
+    assert_eq!(oh, 200);
+    assert_eq!(obuf.len(), ow as usize * oh as usize * 4);
+
+    let mut cfg = WallPhotoConfig {
+        asset_path: Some("assets/photos/rot.png".into()),
+        pixel_size: [400, 200],
+        rotation_deg: 90.0,
+        ..Default::default()
+    };
+    cfg.perspective_quad = Some([[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]]);
+    let (pw, ph, _) = process_photo_rgba(sw, sh, &rgba, &cfg, 1000);
+    assert!(
+        pw < ph,
+        "Expected portrait output after 90 deg rotation, got {pw}x{ph}"
+    );
+
+    cfg.fit_to_wall(380.0, 240.0);
+    assert!(
+        cfg.width_mm < cfg.height_mm,
+        "fit_to_wall must preserve rotated portrait aspect, got {}x{}",
+        cfg.width_mm,
+        cfg.height_mm
+    );
+    assert!((cfg.height_mm - 240.0).abs() < 1e-4);
+    assert!((cfg.width_mm - 120.0).abs() < 1e-4);
+}

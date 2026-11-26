@@ -26,8 +26,85 @@ pub fn load_rgba_image(path: &Path, max_dim: u32) -> Result<DecodedPhoto, String
     })
 }
 
-/// Applies crop, keystone / 4-point projective perspective rectification, and clockwise rotation
-/// to a source RGBA image buffer using bilinear sampling.
+/// Bilinearly samples a source RGBA buffer at normalized UV `(su, sv) in [0, 1]^2`.
+#[inline]
+fn sample_bilinear(src_w: u32, src_h: u32, src_rgba: &[u8], su: f64, sv: f64, out_rgba: &mut [u8]) {
+    let sx = su.clamp(0.0, 1.0) * (src_w - 1) as f64;
+    let sy = sv.clamp(0.0, 1.0) * (src_h - 1) as f64;
+    let x0 = sx.floor() as u32;
+    let y0 = sy.floor() as u32;
+    let x1 = (x0 + 1).min(src_w - 1);
+    let y1 = (y0 + 1).min(src_h - 1);
+    let fx = sx - x0 as f64;
+    let fy = sy - y0 as f64;
+
+    let idx00 = (y0 as usize * src_w as usize + x0 as usize) * 4;
+    let idx10 = (y0 as usize * src_w as usize + x1 as usize) * 4;
+    let idx01 = (y1 as usize * src_w as usize + x0 as usize) * 4;
+    let idx11 = (y1 as usize * src_w as usize + x1 as usize) * 4;
+
+    for (c, dst) in out_rgba.iter_mut().enumerate().take(4) {
+        let v00 = src_rgba[idx00 + c] as f64;
+        let v10 = src_rgba[idx10 + c] as f64;
+        let v01 = src_rgba[idx01 + c] as f64;
+        let v11 = src_rgba[idx11 + c] as f64;
+        let top = v00 * (1.0 - fx) + v10 * fx;
+        let bot = v01 * (1.0 - fx) + v11 * fx;
+        *dst = (top * (1.0 - fy) + bot * fy).round().clamp(0.0, 255.0) as u8;
+    }
+}
+
+/// Rotates `src_rgba` clockwise by `rotation_deg` into the oriented image coordinate frame
+/// where crop and 4-corner perspective pins operate.
+pub fn orient_photo_rgba(
+    src_w: u32,
+    src_h: u32,
+    src_rgba: &[u8],
+    rotation_deg: f64,
+    max_out_dim: u32,
+) -> (u32, u32, Vec<u8>) {
+    if src_w == 0 || src_h == 0 || src_rgba.len() < (src_w as usize * src_h as usize * 4) {
+        return (src_w, src_h, src_rgba.to_vec());
+    }
+    if rotation_deg.abs() <= 1e-4 && src_w <= max_out_dim && src_h <= max_out_dim {
+        return (src_w, src_h, src_rgba.to_vec());
+    }
+
+    let sw = src_w as f64;
+    let sh = src_h as f64;
+    let rad = rotation_deg.to_radians();
+    let (sin_r, cos_r) = rad.sin_cos();
+    let rot_w = (sw * cos_r.abs() + sh * sin_r.abs()).max(16.0);
+    let rot_h = (sw * sin_r.abs() + sh * cos_r.abs()).max(16.0);
+
+    let max_d = max_out_dim.max(64) as f64;
+    let scale = (max_d / rot_w.max(rot_h)).min(1.0);
+    let out_w = (rot_w * scale).round().clamp(16.0, max_d) as u32;
+    let out_h = (rot_h * scale).round().clamp(16.0, max_d) as u32;
+
+    let mut out = vec![0u8; out_w as usize * out_h as usize * 4];
+    for oy in 0..out_h {
+        let ov = (oy as f64 + 0.5) / out_h as f64;
+        let py_o = (ov - 0.5) * rot_h;
+        for ox in 0..out_w {
+            let ou = (ox as f64 + 0.5) / out_w as f64;
+            let px_o = (ou - 0.5) * rot_w;
+            let px_s = px_o * cos_r + py_o * sin_r;
+            let py_s = -px_o * sin_r + py_o * cos_r;
+            let su = px_s / sw + 0.5;
+            let sv = py_s / sh + 0.5;
+            if !(0.0..=1.0).contains(&su) || !(0.0..=1.0).contains(&sv) {
+                continue;
+            }
+            let dst = (oy as usize * out_w as usize + ox as usize) * 4;
+            sample_bilinear(src_w, src_h, src_rgba, su, sv, &mut out[dst..dst + 4]);
+        }
+    }
+    (out_w, out_h, out)
+}
+
+/// Applies clockwise rotation FIRST, then crop & 4-corner projective perspective rectification
+/// defined in the oriented frame, using a single bilinear sampling pass over `src_rgba` (zero double-blur).
 /// `max_out_dim` controls output resolution (`1400` for crisp render, `480` for fast live drag preview).
 pub fn process_photo_rgba(
     src_w: u32,
@@ -45,76 +122,56 @@ pub fn process_photo_rgba(
 
     let sw = src_w as f64;
     let sh = src_h as f64;
-    let [tl, tr, br, bl] = cfg.effective_quad();
-
-    let dist_px =
-        |a: [f64; 2], b: [f64; 2]| -> f64 { ((b[0] - a[0]) * sw).hypot((b[1] - a[1]) * sh) };
-    let rect_w = (0.5 * (dist_px(tl, tr) + dist_px(bl, br))).max(16.0);
-    let rect_h = (0.5 * (dist_px(tl, bl) + dist_px(tr, br))).max(16.0);
-
     let rad = cfg.rotation_deg.to_radians();
     let (sin_r, cos_r) = rad.sin_cos();
-    let rot_w = rect_w * cos_r.abs() + rect_h * sin_r.abs();
-    let rot_h = rect_w * sin_r.abs() + rect_h * cos_r.abs();
+
+    // Step 1 frame: oriented image bounding box dimensions.
+    let rot_w = (sw * cos_r.abs() + sh * sin_r.abs()).max(16.0);
+    let rot_h = (sw * sin_r.abs() + sh * cos_r.abs()).max(16.0);
+
+    // Step 2 quad operates inside the oriented [0, 1]^2 UV space.
+    let [tl, tr, br, bl] = cfg.effective_quad();
+    let dist_o =
+        |a: [f64; 2], b: [f64; 2]| -> f64 { ((b[0] - a[0]) * rot_w).hypot((b[1] - a[1]) * rot_h) };
+    let rect_w = (0.5 * (dist_o(tl, tr) + dist_o(bl, br))).max(16.0);
+    let rect_h = (0.5 * (dist_o(tl, bl) + dist_o(tr, br))).max(16.0);
 
     let max_d = max_out_dim.max(64) as f64;
-    let scale = (max_d / rot_w.max(rot_h)).min(1.0);
-    let out_w = (rot_w * scale).round().clamp(16.0, max_d) as u32;
-    let out_h = (rot_h * scale).round().clamp(16.0, max_d) as u32;
+    let scale = (max_d / rect_w.max(rect_h)).min(1.0);
+    let out_w = (rect_w * scale).round().clamp(16.0, max_d) as u32;
+    let out_h = (rect_h * scale).round().clamp(16.0, max_d) as u32;
 
     let hom = compute_quad_homography(tl, tr, br, bl);
     let mut out = vec![0u8; out_w as usize * out_h as usize * 4];
 
     for oy in 0..out_h {
-        let v_out = (oy as f64 + 0.5) / out_h as f64;
-        let py = (v_out - 0.5) * rot_h;
+        let vr = (oy as f64 + 0.5) / out_h as f64;
         for ox in 0..out_w {
-            let u_out = (ox as f64 + 0.5) / out_w as f64;
-            let px = (u_out - 0.5) * rot_w;
-
-            let rx = px * cos_r + py * sin_r;
-            let ry = -px * sin_r + py * cos_r;
-            let ur = rx / rect_w + 0.5;
-            let vr = ry / rect_h + 0.5;
-
-            let dst_idx = (oy as usize * out_w as usize + ox as usize) * 4;
-            if !(0.0..=1.0).contains(&ur) || !(0.0..=1.0).contains(&vr) {
-                continue;
-            }
+            let ur = (ox as f64 + 0.5) / out_w as f64;
 
             let denom = hom[6] * ur + hom[7] * vr + hom[8];
             if denom.abs() < 1e-9 {
                 continue;
             }
-            let su = (hom[0] * ur + hom[1] * vr + hom[2]) / denom;
-            let sv = (hom[3] * ur + hom[4] * vr + hom[5]) / denom;
+            let ou = (hom[0] * ur + hom[1] * vr + hom[2]) / denom;
+            let ov = (hom[3] * ur + hom[4] * vr + hom[5]) / denom;
+            if !(0.0..=1.0).contains(&ou) || !(0.0..=1.0).contains(&ov) {
+                continue;
+            }
+
+            // Map oriented UV back through inverse rotation to raw source UV in a single lookup.
+            let px_o = (ou - 0.5) * rot_w;
+            let py_o = (ov - 0.5) * rot_h;
+            let px_s = px_o * cos_r + py_o * sin_r;
+            let py_s = -px_o * sin_r + py_o * cos_r;
+            let su = px_s / sw + 0.5;
+            let sv = py_s / sh + 0.5;
             if !(0.0..=1.0).contains(&su) || !(0.0..=1.0).contains(&sv) {
                 continue;
             }
 
-            let sx = su * (sw - 1.0);
-            let sy = sv * (sh - 1.0);
-            let x0 = sx.floor() as u32;
-            let y0 = sy.floor() as u32;
-            let x1 = (x0 + 1).min(src_w - 1);
-            let y1 = (y0 + 1).min(src_h - 1);
-            let fx = sx - x0 as f64;
-            let fy = sy - y0 as f64;
-
-            let idx00 = (y0 as usize * src_w as usize + x0 as usize) * 4;
-            let idx10 = (y0 as usize * src_w as usize + x1 as usize) * 4;
-            let idx01 = (y1 as usize * src_w as usize + x0 as usize) * 4;
-            let idx11 = (y1 as usize * src_w as usize + x1 as usize) * 4;
-
-            for c in 0..4 {
-                let v00 = src_rgba[idx00 + c] as f64;
-                let v10 = src_rgba[idx10 + c] as f64;
-                let v01 = src_rgba[idx01 + c] as f64;
-                let v11 = src_rgba[idx11 + c] as f64;
-                let top = v00 * (1.0 - fx) + v10 * fx;
-                let bot = v01 * (1.0 - fx) + v11 * fx;
-                out[dst_idx + c] = (top * (1.0 - fy) + bot * fy).round().clamp(0.0, 255.0) as u8;
-            }
+            let dst = (oy as usize * out_w as usize + ox as usize) * 4;
+            sample_bilinear(src_w, src_h, src_rgba, su, sv, &mut out[dst..dst + 4]);
         }
     }
 

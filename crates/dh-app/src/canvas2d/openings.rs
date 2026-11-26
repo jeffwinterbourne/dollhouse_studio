@@ -1,9 +1,11 @@
 use crate::canvas2d::photo_layer::BlueprintXform;
 use crate::theme::StudioPalette;
 use dh_core::{
-    ComponentDef, DisplayUnit, FlushTopMode, ProjectWall, WallOpening, WindowParams, WindowStyle,
+    ComponentDef, DisplayUnit, FlushTopMode, ProjectWall, ShutterStyle, WallOpening, WindowParams,
+    WindowStyle,
 };
-use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Shape, Stroke, Vec2};
+use dh_geometry::{clipped_trim_outer_contour, profile_kind};
+use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Shape, Stroke, StrokeKind, Vec2};
 use std::collections::HashSet;
 use std::f32::consts::PI;
 
@@ -78,8 +80,8 @@ impl OpeningsInteractionState {
     }
 }
 
-/// Paints the wall elevation outline, architectural opening symbols, flush indicators, smart guides,
-/// and interactive mouse handles (opening move/resize + wall width/height edge dragging).
+/// Paints the wall elevation outline, architectural opening symbols, architrave tolerance envelopes,
+/// flush indicators, smart guides, and interactive mouse handles.
 #[allow(clippy::too_many_arguments)]
 pub fn interact_and_draw_openings(
     ui: &mut egui::Ui,
@@ -90,6 +92,7 @@ pub fn interact_and_draw_openings(
     components: &[ComponentDef],
     selected_ids: &[String],
     unit: DisplayUnit,
+    show_architrave_outlines: bool,
     state: &mut OpeningsInteractionState,
     allow_edit: bool,
     canvas_hovered: bool,
@@ -429,6 +432,11 @@ pub fn interact_and_draw_openings(
         }
     }
 
+    // Optional Architrave / Exterior Trim Tolerance Outlines & Clash Alerts.
+    if show_architrave_outlines {
+        paint_architrave_tolerance_outlines(painter, xform, wall, components);
+    }
+
     // Draw every opening cutout & architectural styling.
     for op in &wall.openings {
         let params = op.resolve_params(components);
@@ -475,6 +483,212 @@ pub fn interact_and_draw_openings(
     }
 
     actions
+}
+
+#[derive(Clone, Copy)]
+struct TrimEnvelopeMm {
+    min_x: f64,
+    min_y: f64,
+    max_x: f64,
+    max_y: f64,
+}
+
+impl TrimEnvelopeMm {
+    fn include_pt(&mut self, x: f64, y: f64) {
+        self.min_x = self.min_x.min(x);
+        self.min_y = self.min_y.min(y);
+        self.max_x = self.max_x.max(x);
+        self.max_y = self.max_y.max(y);
+    }
+}
+
+struct PreparedTrimEnvelope {
+    contour_mm: Vec<[f64; 2]>,
+    sill_mm: Option<[f64; 4]>,
+    shutters_mm: Vec<[f64; 4]>,
+    bbox: TrimEnvelopeMm,
+    overhang: bool,
+    clash: bool,
+}
+
+fn paint_architrave_tolerance_outlines(
+    painter: &egui::Painter,
+    xform: BlueprintXform,
+    wall: &ProjectWall,
+    components: &[ComponentDef],
+) {
+    let mut prepared: Vec<PreparedTrimEnvelope> = Vec::with_capacity(wall.openings.len());
+    for op in &wall.openings {
+        let params = op.resolve_params(components);
+        let w = params.opening_width;
+        let h = params.opening_height;
+        let cx = op.x_from_left + w * 0.5;
+        let cy = op.y_from_bottom + h * 0.5;
+        let outset = params.trim_width + params.wall_fit_clearance;
+        let contour =
+            clipped_trim_outer_contour(profile_kind(params.style), w, h, outset, &params, 32);
+
+        let mut bbox = TrimEnvelopeMm {
+            min_x: f64::INFINITY,
+            min_y: f64::INFINITY,
+            max_x: f64::NEG_INFINITY,
+            max_y: f64::NEG_INFINITY,
+        };
+        let mut contour_mm = Vec::with_capacity(contour.len());
+        for pt in contour {
+            let wx = cx + pt[0];
+            let wy = cy + pt[1];
+            bbox.include_pt(wx, wy);
+            contour_mm.push([wx, wy]);
+        }
+
+        let sill_mm = if params.sill_enabled
+            && (params.style.supports_sill() || params.style.is_door())
+            && !params.flush_bottom_sill
+        {
+            let half_s = w * 0.5 + params.trim_width + params.sill_overhang;
+            let sx0 = cx
+                - if params.flush_left_jamb {
+                    w * 0.5 + params.wall_fit_clearance
+                } else {
+                    half_s
+                };
+            let sx1 = cx
+                + if params.flush_right_jamb {
+                    w * 0.5 + params.wall_fit_clearance
+                } else {
+                    half_s
+                };
+            let sy0 = op.y_from_bottom - params.trim_width - params.sill_depth;
+            let sy1 = op.y_from_bottom;
+            bbox.include_pt(sx0, sy0);
+            bbox.include_pt(sx1, sy1);
+            Some([sx0, sy0, sx1, sy1])
+        } else {
+            None
+        };
+
+        let mut shutters_mm = Vec::new();
+        if params.shutter_style != ShutterStyle::None && !params.style.is_door() {
+            let sh_w = (w * params.shutter_width_ratio).clamp(6.0, 45.0);
+            let sy0 = op.y_from_bottom;
+            let sy1 = op.y_from_bottom + h;
+            if !params.flush_left_jamb {
+                let lx1 = op.x_from_left - outset;
+                let lx0 = lx1 - sh_w;
+                bbox.include_pt(lx0, sy0);
+                bbox.include_pt(lx1, sy1);
+                shutters_mm.push([lx0, sy0, lx1, sy1]);
+            }
+            if !params.flush_right_jamb {
+                let rx0 = op.x_from_left + w + outset;
+                let rx1 = rx0 + sh_w;
+                bbox.include_pt(rx0, sy0);
+                bbox.include_pt(rx1, sy1);
+                shutters_mm.push([rx0, sy0, rx1, sy1]);
+            }
+        }
+
+        let overhang = bbox.min_x < -0.15
+            || bbox.min_y < -0.15
+            || bbox.max_x > wall.width + 0.15
+            || bbox.max_y > wall.height + 0.15;
+
+        prepared.push(PreparedTrimEnvelope {
+            contour_mm,
+            sill_mm,
+            shutters_mm,
+            bbox,
+            overhang,
+            clash: false,
+        });
+    }
+
+    let mut overlap_zones: Vec<[f64; 4]> = Vec::new();
+    for i in 0..prepared.len() {
+        for j in (i + 1)..prepared.len() {
+            let a = prepared[i].bbox;
+            let b = prepared[j].bbox;
+            let ox0 = a.min_x.max(b.min_x);
+            let ox1 = a.max_x.min(b.max_x);
+            let oy0 = a.min_y.max(b.min_y);
+            let oy1 = a.max_y.min(b.max_y);
+            if ox1 - ox0 > 0.15 && oy1 - oy0 > 0.15 {
+                prepared[i].clash = true;
+                prepared[j].clash = true;
+                overlap_zones.push([ox0, oy0, ox1, oy1]);
+            }
+        }
+    }
+
+    let clean_col = Color32::from_rgb(72, 188, 198);
+    let warn_col = Color32::from_rgb(245, 165, 45);
+    let clash_col = Color32::from_rgb(235, 72, 72);
+
+    for env in &prepared {
+        let col = if env.clash {
+            clash_col
+        } else if env.overhang {
+            warn_col
+        } else {
+            clean_col
+        };
+        let halo = col.gamma_multiply(0.18);
+        let stroke = Stroke::new(1.5, col.gamma_multiply(0.92));
+
+        if env.contour_mm.len() >= 3 {
+            let pts: Vec<Pos2> = env
+                .contour_mm
+                .iter()
+                .map(|p| xform.mm_to_screen(*p))
+                .collect();
+            painter.add(Shape::closed_line(pts.clone(), Stroke::new(4.5, halo)));
+            painter.add(Shape::closed_line(pts, stroke));
+        }
+
+        if let Some([x0, y0, x1, y1]) = env.sill_mm {
+            let sr = Rect::from_min_max(xform.mm_to_screen([x0, y1]), xform.mm_to_screen([x1, y0]));
+            painter.rect_filled(sr, 1.0, halo);
+            painter.rect_stroke(sr, 1.0, stroke, StrokeKind::Outside);
+        }
+
+        for [x0, y0, x1, y1] in &env.shutters_mm {
+            let sr = Rect::from_min_max(
+                xform.mm_to_screen([*x0, *y1]),
+                xform.mm_to_screen([*x1, *y0]),
+            );
+            painter.rect_filled(sr, 1.0, halo);
+            painter.rect_stroke(sr, 1.0, stroke, StrokeKind::Outside);
+        }
+
+        if env.overhang && !env.clash {
+            let top_mid =
+                xform.mm_to_screen([(env.bbox.min_x + env.bbox.max_x) * 0.5, env.bbox.max_y]);
+            painter.text(
+                top_mid + Vec2::new(0.0, -3.0),
+                Align2::CENTER_BOTTOM,
+                "Trim overhang",
+                FontId::proportional(10.0),
+                warn_col,
+            );
+        }
+    }
+
+    for [ox0, oy0, ox1, oy1] in overlap_zones {
+        let cr = Rect::from_min_max(
+            xform.mm_to_screen([ox0, oy1]),
+            xform.mm_to_screen([ox1, oy0]),
+        );
+        painter.rect_filled(cr, 1.0, Color32::from_rgba_unmultiplied(235, 72, 72, 70));
+        painter.rect_stroke(cr, 1.0, Stroke::new(1.5, clash_col), StrokeKind::Outside);
+        painter.text(
+            cr.center(),
+            Align2::CENTER_CENTER,
+            "Trim Clash",
+            FontId::proportional(10.0),
+            clash_col,
+        );
+    }
 }
 
 pub fn opening_screen_rect(

@@ -1,6 +1,7 @@
 use dh_core::{
-    ComponentDef, DisplayUnit, FlushTopMode, InstanceOverrides, Project, ProjectKind, ScalePreset,
-    UndoHistory, WindowParams, WindowStyle,
+    ComponentDef, DimAnchor, DimOrientation, DisplayUnit, FlushTopMode, InstanceOverrides,
+    OpeningEdgeKind, Project, ProjectKind, ScalePreset, UndoHistory, WallDimension, WallEdgeKind,
+    WindowParams, WindowStyle,
 };
 use std::collections::HashSet;
 
@@ -185,4 +186,65 @@ fn apply_style_only_preserves_opening_dimensions_and_wall_specs() {
 
     let comp = ComponentDef::new("Test", tpl);
     assert!(!comp.id.is_empty());
+}
+
+#[test]
+fn associative_dimensions_track_openings_and_drive_geometry() {
+    let mut proj =
+        Project::new_multi_wall("CAD Dim", true, ScalePreset::Scale1_12, DisplayUnit::Mm);
+    let mut comps = proj.components.clone();
+    let wall = &mut proj.walls[0];
+    let op_id = wall.openings[0].id.clone();
+
+    let dim = WallDimension::new_anchored(
+        DimAnchor::OpeningEdge {
+            opening_id: op_id.clone(),
+            edge: OpeningEdgeKind::BottomLeft,
+        },
+        DimAnchor::OpeningEdge {
+            opening_id: op_id.clone(),
+            edge: OpeningEdgeKind::BottomRight,
+        },
+        DimOrientation::Horizontal,
+        -10.0,
+        [0.0, 0.0],
+        [10.0, 0.0],
+    );
+    let dim_id = dim.id.clone();
+    wall.dimensions.push(dim);
+    wall.sync_anchored_dimensions(&comps);
+
+    let orig_w = wall.openings[0].width(&comps);
+    assert!((wall.dimensions.last().unwrap().length_mm() - orig_w).abs() < 1e-6);
+
+    // Moving the opening automatically moves the associative dimension endpoints
+    wall.openings[0].x_from_left += 25.0;
+    wall.sync_anchored_dimensions(&comps);
+    let moved_d = wall.dimensions.last().unwrap();
+    assert!((moved_d.x0 - wall.openings[0].x_from_left).abs() < 1e-6);
+
+    // Driving the dimension resizes the linked opening/component cleanly
+    wall.apply_driving_dimension(&dim_id, 77.5, &mut comps)
+        .unwrap();
+    assert!((wall.openings[0].width(&comps) - 77.5).abs() < 1e-6);
+
+    // Wall left edge to opening left edge drives clearance
+    let clr_dim = WallDimension::new_anchored(
+        DimAnchor::WallEdge {
+            edge: WallEdgeKind::Left,
+        },
+        DimAnchor::OpeningEdge {
+            opening_id: op_id,
+            edge: OpeningEdgeKind::Left,
+        },
+        DimOrientation::Horizontal,
+        12.0,
+        [0.0, 100.0],
+        [50.0, 100.0],
+    );
+    let clr_id = clr_dim.id.clone();
+    wall.dimensions.push(clr_dim);
+    wall.apply_driving_dimension(&clr_id, 42.0, &mut comps)
+        .unwrap();
+    assert!((wall.openings[0].x_from_left - 42.0).abs() < 1e-6);
 }

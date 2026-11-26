@@ -19,4 +19,7 @@ pub use project::{
 };
 pub use template::{PieceTemplate, TemplateCategory, TemplateScope};
 pub use units::DisplayUnit;
-pub use wall::{ProjectWall, WallDimension, WallOpening, WallPhotoConfig, WallPlacement3D};
+pub use wall::{
+    CornerKind, DimAnchor, DimOrientation, OpeningEdgeKind, ProjectWall, WallDimension,
+    WallEdgeKind, WallOpening, WallPhotoConfig, WallPlacement3D,
+};
