@@ -47,9 +47,8 @@ pub fn process_photo_rgba(
     let sh = src_h as f64;
     let [tl, tr, br, bl] = cfg.effective_quad();
 
-    let dist_px = |a: [f64; 2], b: [f64; 2]| -> f64 {
-        ((b[0] - a[0]) * sw).hypot((b[1] - a[1]) * sh)
-    };
+    let dist_px =
+        |a: [f64; 2], b: [f64; 2]| -> f64 { ((b[0] - a[0]) * sw).hypot((b[1] - a[1]) * sh) };
     let rect_w = (0.5 * (dist_px(tl, tr) + dist_px(bl, br))).max(16.0);
     let rect_h = (0.5 * (dist_px(tl, bl) + dist_px(tr, br))).max(16.0);
 
@@ -124,12 +123,7 @@ pub fn process_photo_rgba(
 
 /// Solves for the 3x3 projective homography mapping unit square `(0,0),(1,0),(1,1),(0,1)`
 /// to `(tl, tr, br, bl)`.
-pub fn compute_quad_homography(
-    tl: [f64; 2],
-    tr: [f64; 2],
-    br: [f64; 2],
-    bl: [f64; 2],
-) -> [f64; 9] {
+pub fn compute_quad_homography(tl: [f64; 2], tr: [f64; 2], br: [f64; 2], bl: [f64; 2]) -> [f64; 9] {
     let unit = [[0.0, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
     let dst = [tl, tr, br, bl];
     let mut a = [[0.0f64; 9]; 8];

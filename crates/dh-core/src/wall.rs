@@ -467,8 +467,12 @@ impl ProjectWall {
             parlor_comp.id.clone(),
             InstanceOverrides::default(),
         ));
-        wall.openings
-            .push(WallOpening::new_unique("Front Entry Door", 152.0, 0.0, door_params));
+        wall.openings.push(WallOpening::new_unique(
+            "Front Entry Door",
+            152.0,
+            0.0,
+            door_params,
+        ));
         wall.openings.push(WallOpening::new_instance(
             "Parlor Right",
             274.0,
@@ -627,10 +631,20 @@ impl ProjectWall {
         self.dimensions.clear();
 
         if self.openings.is_empty() {
-            self.dimensions
-                .push(WallDimension::new(0.0, self.height, self.width, self.height, 16.0));
-            self.dimensions
-                .push(WallDimension::new(self.width, 0.0, self.width, self.height, -16.0));
+            self.dimensions.push(WallDimension::new(
+                0.0,
+                self.height,
+                self.width,
+                self.height,
+                16.0,
+            ));
+            self.dimensions.push(WallDimension::new(
+                self.width,
+                0.0,
+                self.width,
+                self.height,
+                -16.0,
+            ));
             return;
         }
 

@@ -403,9 +403,10 @@ pub fn draw_welcome_hub(
 
 fn matches_template_filter(tpl: &PieceTemplate, q: &str, doors_only: Option<bool>) -> bool {
     if let Some(d) = doors_only
-        && tpl.params.style.is_door() != d {
-            return false;
-        }
+        && tpl.params.style.is_door() != d
+    {
+        return false;
+    }
     if q.is_empty() {
         return true;
     }

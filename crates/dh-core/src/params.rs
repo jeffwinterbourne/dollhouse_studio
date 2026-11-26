@@ -1175,8 +1175,7 @@ impl WindowParams {
         };
 
         let effective_int_chamfer = if p.architrave_style.has_chamfer() && p.chamfer_interior {
-            let max_c =
-                (p.interior_trim_width * 0.52).min(p.interior_trim_thickness * 0.68 / 1.15);
+            let max_c = (p.interior_trim_width * 0.52).min(p.interior_trim_thickness * 0.68 / 1.15);
             let c = p.chamfer_size.min(max_c);
             if c >= 0.15 { c } else { 0.0 }
         } else {

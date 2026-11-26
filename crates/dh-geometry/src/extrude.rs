@@ -174,14 +174,18 @@ impl TriMesh {
             }
         }
 
-        let is_watertight = boundary_edges == 0 && non_manifold_edges == 0 && degenerate_triangles == 0;
+        let is_watertight =
+            boundary_edges == 0 && non_manifold_edges == 0 && degenerate_triangles == 0;
         let volume_mm3 = (signed_volume_6 / 6.0) as f32;
 
         if !is_watertight {
             let mut sample = Vec::new();
             for &(a, b) in directed_edges.keys() {
                 if !directed_edges.contains_key(&(b, a)) && sample.len() < 6 {
-                    sample.push(format!("{:?} -> {:?}", self.positions[a as usize], self.positions[b as usize]));
+                    sample.push(format!(
+                        "{:?} -> {:?}",
+                        self.positions[a as usize], self.positions[b as usize]
+                    ));
                 }
             }
             return Err(format!(
@@ -326,7 +330,10 @@ pub fn extrude_slabs_with_moulding(raw_slabs: &[Slab], moulding: &MouldingConfig
     let mut all_pts: Vec<Pt2> = Vec::new();
     let mut seen: HashSet<(i64, i64)> = HashSet::new();
     let mut add_pt = |p: Pt2| {
-        let key = ((p[0] * 100_000.0).round() as i64, (p[1] * 100_000.0).round() as i64);
+        let key = (
+            (p[0] * 100_000.0).round() as i64,
+            (p[1] * 100_000.0).round() as i64,
+        );
         if seen.insert(key) {
             all_pts.push(p);
         }
@@ -779,10 +786,7 @@ fn emit_shape_cap(mb: &mut MeshBuilder, shape: &Shape2D, z: f64, face_up: bool) 
         }
     }
 
-    let vert_ids: Vec<u32> = cap_pts
-        .iter()
-        .map(|p| mb.vertex(p[0], p[1], z))
-        .collect();
+    let vert_ids: Vec<u32> = cap_pts.iter().map(|p| mb.vertex(p[0], p[1], z)).collect();
 
     for [i0, i1, i2] in cap_tris {
         mb.push_tri(vert_ids[i0], vert_ids[i1], vert_ids[i2]);
@@ -826,10 +830,38 @@ pub fn build_cone_knuckle_block(
 
     // Local right-handed orthonormal frame (u, v, n) with u x v = n pointing outward from `face`
     let (u, v, n, hu, hv, hn) = match face {
-        HingeFace::PosY => ([1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, 1.0, 0.0], hx, hz, hy),
-        HingeFace::NegY => ([-1.0, 0.0, 0.0], [0.0, 0.0, -1.0], [0.0, -1.0, 0.0], hx, hz, hy),
-        HingeFace::PosX => ([0.0, 1.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 0.0], hy, hz, hx),
-        HingeFace::NegX => ([0.0, -1.0, 0.0], [0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], hy, hz, hx),
+        HingeFace::PosY => (
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, -1.0],
+            [0.0, 1.0, 0.0],
+            hx,
+            hz,
+            hy,
+        ),
+        HingeFace::NegY => (
+            [-1.0, 0.0, 0.0],
+            [0.0, 0.0, -1.0],
+            [0.0, -1.0, 0.0],
+            hx,
+            hz,
+            hy,
+        ),
+        HingeFace::PosX => (
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 0.0],
+            hy,
+            hz,
+            hx,
+        ),
+        HingeFace::NegX => (
+            [0.0, -1.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [-1.0, 0.0, 0.0],
+            hy,
+            hz,
+            hx,
+        ),
     };
 
     let r = radius.clamp(0.45, (hu.min(hv) - 0.14).max(0.45));

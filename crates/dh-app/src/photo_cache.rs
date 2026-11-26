@@ -94,14 +94,12 @@ impl WallPhotoTextureCache {
 
         let target_dim = if fast_preview { 480 } else { 1400 };
         let xform_hash = cfg.transform_hash();
-        let proc_ready = self
-            .loaded
-            .as_ref()
-            .is_some_and(|(_, h, d)| *h == xform_hash && (*d >= target_dim || !cfg.has_edits()))
-            && self
-                .egui_tex
-                .as_ref()
-                .is_some_and(|(k, h, d, _)| k == &key && *h == xform_hash && (*d >= target_dim || !cfg.has_edits()));
+        let proc_ready =
+            self.loaded.as_ref().is_some_and(|(_, h, d)| {
+                *h == xform_hash && (*d >= target_dim || !cfg.has_edits())
+            }) && self.egui_tex.as_ref().is_some_and(|(k, h, d, _)| {
+                k == &key && *h == xform_hash && (*d >= target_dim || !cfg.has_edits())
+            });
 
         if !proc_ready {
             let raw = self.raw.as_ref()?;

@@ -221,7 +221,10 @@ fn project_wall_with_component_instances_builds_watertight_punched_wall() {
 #[test]
 fn exterior_addons_shutters_headers_and_flower_boxes_are_watertight_zero_overhang() {
     assert_eq!(WindowStyle::ALL.len(), 16);
-    for astyle in [ArchitraveStyle::Chamfered, ArchitraveStyle::ChamferedStepped] {
+    for astyle in [
+        ArchitraveStyle::Chamfered,
+        ArchitraveStyle::ChamferedStepped,
+    ] {
         for shutter in ShutterStyle::ALL {
             for header in HeaderStyle::ALL {
                 for flower_box in [false, true] {

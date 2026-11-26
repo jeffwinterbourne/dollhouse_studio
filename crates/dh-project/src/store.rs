@@ -56,7 +56,11 @@ impl ProjectStore {
             expected_comp_names.insert(fname);
             comp_files.push(rel);
         }
-        prune_dir_except(&dir.join("components"), "component.json", &expected_comp_names)?;
+        prune_dir_except(
+            &dir.join("components"),
+            "component.json",
+            &expected_comp_names,
+        )?;
 
         let mut wall_files = Vec::with_capacity(project.walls.len());
         let mut expected_wall_names = HashSet::new();
@@ -188,8 +192,7 @@ impl ProjectStore {
 
     pub fn write_autosave(dir: &Path, project: &Project) -> Result<(), String> {
         let auto_dir = dir.join(AUTOSAVE_DIR);
-        fs::create_dir_all(&auto_dir)
-            .map_err(|e| format!("Failed creating autosave dir: {e}"))?;
+        fs::create_dir_all(&auto_dir).map_err(|e| format!("Failed creating autosave dir: {e}"))?;
         let env = AutosaveEnvelope {
             saved_at_epoch: dh_core::now_epoch(),
             project: project.clone(),
@@ -272,17 +275,14 @@ fn prune_dir_except(
 
 pub(crate) fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed creating parent directory: {e}"))?;
+        fs::create_dir_all(parent).map_err(|e| format!("Failed creating parent directory: {e}"))?;
     }
-    let json = serde_json::to_string_pretty(value)
-        .map_err(|e| format!("Failed serializing JSON: {e}"))?;
+    let json =
+        serde_json::to_string_pretty(value).map_err(|e| format!("Failed serializing JSON: {e}"))?;
 
     let tmp_name = format!(
         "{}.tmp",
-        path.file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("temp")
+        path.file_name().and_then(|s| s.to_str()).unwrap_or("temp")
     );
     let tmp_path = path.with_file_name(tmp_name);
     fs::write(&tmp_path, json)
@@ -296,8 +296,7 @@ pub(crate) fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<
 }
 
 pub(crate) fn read_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, String> {
-    let text = fs::read_to_string(path)
-        .map_err(|e| format!("Failed reading {}: {e}", path.display()))?;
-    serde_json::from_str(&text)
-        .map_err(|e| format!("Invalid JSON in {}: {e}", path.display()))
+    let text =
+        fs::read_to_string(path).map_err(|e| format!("Failed reading {}: {e}", path.display()))?;
+    serde_json::from_str(&text).map_err(|e| format!("Invalid JSON in {}: {e}", path.display()))
 }

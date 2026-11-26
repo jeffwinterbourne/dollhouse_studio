@@ -8,7 +8,9 @@ use dh_core::{
 use dh_export::BedSizePreset;
 use dh_project::ThemeMode;
 use dh_render::{CameraPreset, ViewportSettings};
-use eframe::egui::{self, Color32, CornerRadius, Margin, Pos2, Rect, RichText, Sense, Stroke, Vec2};
+use eframe::egui::{
+    self, Color32, CornerRadius, Margin, Pos2, Rect, RichText, Sense, Stroke, Vec2,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum ActiveViewport {
@@ -211,11 +213,11 @@ pub fn draw_top_ribbon(
                 );
                 ui.separator();
 
-                let save_btn = egui::Button::new(
-                    RichText::new("Save")
-                        .strong()
-                        .color(if dirty { pal.accent_text } else { pal.text_primary }),
-                )
+                let save_btn = egui::Button::new(RichText::new("Save").strong().color(if dirty {
+                    pal.accent_text
+                } else {
+                    pal.text_primary
+                }))
                 .fill(if dirty { pal.accent } else { pal.surface_card })
                 .corner_radius(CornerRadius::same(5));
                 if ui
@@ -321,9 +323,17 @@ pub fn draw_top_ribbon(
                     let text = RichText::new(tab.label())
                         .size(13.0)
                         .strong()
-                        .color(if active { pal.accent } else { pal.text_secondary });
+                        .color(if active {
+                            pal.accent
+                        } else {
+                            pal.text_secondary
+                        });
                     let btn = egui::Button::new(text)
-                        .fill(if active { pal.surface_card } else { Color32::TRANSPARENT })
+                        .fill(if active {
+                            pal.surface_card
+                        } else {
+                            Color32::TRANSPARENT
+                        })
                         .stroke(if active {
                             Stroke::new(1.0, pal.border)
                         } else {
@@ -728,7 +738,11 @@ fn ribbon_icon_button(
             Pos2::new(resp.rect.left() - 2.0, resp.rect.center().y - 7.0),
             Vec2::splat(14.0),
         );
-        let _ = (ir, icon, paint_icon as fn(&egui::Painter, Rect, VectorIcon, Color32));
+        let _ = (
+            ir,
+            icon,
+            paint_icon as fn(&egui::Painter, Rect, VectorIcon, Color32),
+        );
         if resp.clicked() {
             clicked = true;
         }

@@ -1,6 +1,8 @@
 use crate::theme::{StudioPalette, segmented_pill};
 use dh_core::{DisplayUnit, Project, ProjectKind};
-use dh_export::{PageOrientation, PaperSize, PdfExportOptions, PdfInstanceMode, estimate_pdf_pages};
+use dh_export::{
+    PageOrientation, PaperSize, PdfExportOptions, PdfInstanceMode, estimate_pdf_pages,
+};
 use eframe::egui::{self, CornerRadius, Margin, RichText, Stroke, Vec2};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -59,8 +61,10 @@ pub fn draw_pdf_export_wizard(
         .fixed_size(Vec2::new(500.0, 440.0))
         .show(ctx, |ui| {
             ui.label(
-                RichText::new("Print at 100% / Actual Size (no page scaling) for exact 1:1 cutting guides.")
-                    .color(pal.text_secondary),
+                RichText::new(
+                    "Print at 100% / Actual Size (no page scaling) for exact 1:1 cutting guides.",
+                )
+                .color(pal.text_secondary),
             );
             ui.add_space(10.0);
 
@@ -130,10 +134,19 @@ pub fn draw_pdf_export_wizard(
             ui.add_space(10.0);
             if project.manifest.kind == ProjectKind::MultiWall {
                 if state.scope == PdfExportScope::ProjectBooklet {
-                    ui.checkbox(&mut state.options.include_cover_bom, "Include Project Cover & Bill of Materials (BOM)");
+                    ui.checkbox(
+                        &mut state.options.include_cover_bom,
+                        "Include Project Cover & Bill of Materials (BOM)",
+                    );
                 }
-                ui.checkbox(&mut state.options.include_wall_tiles, "Include Tiled 1:1 Wall Elevations (with corner alignment marks)");
-                ui.checkbox(&mut state.options.include_cutout_and_acetate, "Include Auto-Packed 1:1 Cutout & Acetate Glazing Sheets");
+                ui.checkbox(
+                    &mut state.options.include_wall_tiles,
+                    "Include Tiled 1:1 Wall Elevations (with corner alignment marks)",
+                );
+                ui.checkbox(
+                    &mut state.options.include_cutout_and_acetate,
+                    "Include Auto-Packed 1:1 Cutout & Acetate Glazing Sheets",
+                );
 
                 if state.options.include_wall_tiles {
                     ui.horizontal(|ui| {
@@ -187,7 +200,9 @@ pub fn draw_pdf_export_wizard(
             ui.add_space(14.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let btn = egui::Button::new(
-                    RichText::new("Save PDF File...").strong().color(pal.accent_text),
+                    RichText::new("Save PDF File...")
+                        .strong()
+                        .color(pal.accent_text),
                 )
                 .fill(pal.accent)
                 .min_size(Vec2::new(130.0, 30.0));

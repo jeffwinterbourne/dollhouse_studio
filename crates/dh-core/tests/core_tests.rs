@@ -16,12 +16,17 @@ fn display_unit_conversions_and_presets_are_exact() {
     assert_eq!(DisplayUnit::Inches.format_value(25.4), "1.000 in");
 
     let in_presets = DisplayUnit::Inches.calibration_presets();
-    assert!(in_presets.iter().any(|(lbl, mm)| *lbl == "1 in" && (*mm - 25.4).abs() < 1e-6));
+    assert!(
+        in_presets
+            .iter()
+            .any(|(lbl, mm)| *lbl == "1 in" && (*mm - 25.4).abs() < 1e-6)
+    );
 }
 
 #[test]
 fn component_instancing_across_walls_with_overrides_and_make_unique() {
-    let mut proj = Project::new_multi_wall("Townhouse", true, ScalePreset::Scale1_12, DisplayUnit::Mm);
+    let mut proj =
+        Project::new_multi_wall("Townhouse", true, ScalePreset::Scale1_12, DisplayUnit::Mm);
     assert_eq!(proj.manifest.kind, ProjectKind::MultiWall);
     assert_eq!(proj.components.len(), 1);
     let comp_id = proj.components[0].id.clone();

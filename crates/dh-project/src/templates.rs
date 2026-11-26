@@ -27,10 +27,7 @@ pub fn list_personal_templates(personal_dir: &Path) -> Vec<PieceTemplate> {
 }
 
 /// Saves a template into `personal_dir` atomically.
-pub fn save_personal_template(
-    personal_dir: &Path,
-    tpl: &PieceTemplate,
-) -> Result<PathBuf, String> {
+pub fn save_personal_template(personal_dir: &Path, tpl: &PieceTemplate) -> Result<PathBuf, String> {
     fs::create_dir_all(personal_dir)
         .map_err(|e| format!("Failed creating personal templates dir: {e}"))?;
     let fname = format!(

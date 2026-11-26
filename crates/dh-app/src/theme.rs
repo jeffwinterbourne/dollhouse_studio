@@ -120,11 +120,21 @@ pub fn apply_studio_theme(ctx: &egui::Context, mode: ThemeMode) -> StudioPalette
     style.spacing.window_margin = egui::Margin::same(12);
     style.spacing.interact_size = Vec2::new(36.0, 23.0);
 
-    style.text_styles.insert(TextStyle::Small, FontId::proportional(11.8));
-    style.text_styles.insert(TextStyle::Body, FontId::proportional(13.2));
-    style.text_styles.insert(TextStyle::Button, FontId::proportional(13.0));
-    style.text_styles.insert(TextStyle::Monospace, FontId::monospace(12.5));
-    style.text_styles.insert(TextStyle::Heading, FontId::proportional(16.5));
+    style
+        .text_styles
+        .insert(TextStyle::Small, FontId::proportional(11.8));
+    style
+        .text_styles
+        .insert(TextStyle::Body, FontId::proportional(13.2));
+    style
+        .text_styles
+        .insert(TextStyle::Button, FontId::proportional(13.0));
+    style
+        .text_styles
+        .insert(TextStyle::Monospace, FontId::monospace(12.5));
+    style
+        .text_styles
+        .insert(TextStyle::Heading, FontId::proportional(16.5));
 
     let mut v = if dark {
         egui::Visuals::dark()
@@ -250,12 +260,19 @@ pub fn segmented_pill<T: PartialEq + Copy>(
                 for &(val, label) in items {
                     let active = *current == val;
                     let text = if active {
-                        RichText::new(label).strong().size(12.8).color(pal.accent_text)
+                        RichText::new(label)
+                            .strong()
+                            .size(12.8)
+                            .color(pal.accent_text)
                     } else {
                         RichText::new(label).size(12.8).color(pal.text_primary)
                     };
                     let btn = egui::Button::new(text)
-                        .fill(if active { pal.accent } else { Color32::TRANSPARENT })
+                        .fill(if active {
+                            pal.accent
+                        } else {
+                            Color32::TRANSPARENT
+                        })
                         .stroke(Stroke::NONE)
                         .corner_radius(CornerRadius::same(5))
                         .min_size(Vec2::new(0.0, 24.0));
@@ -362,7 +379,10 @@ pub fn slider_u32(
         ui.label(RichText::new(label).size(12.8).color(pal.text_primary));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             changed |= ui
-                .add_sized([54.0, 22.0], egui::DragValue::new(val).range(range.clone()).speed(0.1))
+                .add_sized(
+                    [54.0, 22.0],
+                    egui::DragValue::new(val).range(range.clone()).speed(0.1),
+                )
                 .changed();
             ui.spacing_mut().slider_width = slider_w;
             changed |= ui

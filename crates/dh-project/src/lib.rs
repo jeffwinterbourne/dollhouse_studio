@@ -11,6 +11,6 @@ pub use preferences::{
 };
 pub use store::{LoadedProject, PROJECT_MANIFEST_FILE, ProjectStore};
 pub use templates::{
-    export_template_file, import_template_file, list_personal_templates, save_personal_template,
-    delete_personal_template, starter_templates,
+    delete_personal_template, export_template_file, import_template_file, list_personal_templates,
+    save_personal_template, starter_templates,
 };

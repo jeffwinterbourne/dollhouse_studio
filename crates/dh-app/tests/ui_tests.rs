@@ -34,7 +34,8 @@ fn welcome_hub_renders_cleanly_in_light_and_dark_themes() {
 fn multi_wall_and_single_piece_side_panels_remain_stable_over_20_frames() {
     let ctx = egui::Context::default();
 
-    let proj = Project::new_multi_wall("Test Facade", true, ScalePreset::Scale1_12, DisplayUnit::Mm);
+    let proj =
+        Project::new_multi_wall("Test Facade", true, ScalePreset::Scale1_12, DisplayUnit::Mm);
     let mut app = DollhouseStudioApp::new_headless_with_project(proj, None);
     let mut exp_widths = Vec::new();
     let mut insp_widths = Vec::new();
@@ -70,7 +71,12 @@ fn multi_wall_and_single_piece_side_panels_remain_stable_over_20_frames() {
 
 #[test]
 fn component_instancing_propagates_and_make_unique_unlinks_cleanly() {
-    let mut proj = Project::new_multi_wall("Component Sync Test", true, ScalePreset::Scale1_12, DisplayUnit::Mm);
+    let mut proj = Project::new_multi_wall(
+        "Component Sync Test",
+        true,
+        ScalePreset::Scale1_12,
+        DisplayUnit::Mm,
+    );
     let cid = proj.components[0].id.clone();
     let linked_ids: Vec<String> = proj.walls[0]
         .openings

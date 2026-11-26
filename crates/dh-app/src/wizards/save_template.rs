@@ -70,10 +70,12 @@ pub fn draw_save_template_modal(
                 ui.vertical(|ui| {
                     ui.label(RichText::new(state.params.style.name()).strong().size(14.5));
                     ui.label(
-                        RichText::new(unit.format_dims(
-                            state.params.opening_width,
-                            state.params.opening_height,
-                        ))
+                        RichText::new(
+                            unit.format_dims(
+                                state.params.opening_width,
+                                state.params.opening_height,
+                            ),
+                        )
                         .small()
                         .color(pal.text_secondary),
                     );
@@ -97,14 +99,22 @@ pub fn draw_save_template_modal(
             );
 
             ui.add_space(8.0);
-            ui.label(RichText::new("Tags (comma separated)").small().color(pal.text_muted));
+            ui.label(
+                RichText::new("Tags (comma separated)")
+                    .small()
+                    .color(pal.text_muted),
+            );
             ui.add(
                 egui::TextEdit::singleline(&mut state.tags_text)
                     .desired_width(ui.available_width()),
             );
 
             ui.add_space(6.0);
-            ui.label(RichText::new("Notes (optional)").small().color(pal.text_muted));
+            ui.label(
+                RichText::new("Notes (optional)")
+                    .small()
+                    .color(pal.text_muted),
+            );
             ui.add(
                 egui::TextEdit::multiline(&mut state.notes)
                     .desired_rows(2)
@@ -114,7 +124,9 @@ pub fn draw_save_template_modal(
             ui.add_space(12.0);
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let save_btn = egui::Button::new(
-                    RichText::new("Save Template").strong().color(pal.accent_text),
+                    RichText::new("Save Template")
+                        .strong()
+                        .color(pal.accent_text),
                 )
                 .fill(pal.accent);
                 let valid = !state.name.trim().is_empty();

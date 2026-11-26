@@ -1,6 +1,4 @@
-use dh_core::{
-    DisplayUnit, Project, ScalePreset, WindowOpeningMode, WindowParams, WindowStyle,
-};
+use dh_core::{DisplayUnit, Project, ScalePreset, WindowOpeningMode, WindowParams, WindowStyle};
 use dh_export::{
     BedSizePreset, PageOrientation, PaperSize, PdfExportOptions, PdfInstanceMode,
     estimate_pdf_pages, pack_project_onto_build_plates, pack_wall_onto_build_plates,
@@ -60,7 +58,8 @@ fn svg_1to1_cutting_templates_and_wall_sheets_are_valid() {
     assert!(svg.contains("(Cut 2x)"));
     assert!(svg.contains("50.0 mm Scale Calibration Bar"));
 
-    let mut proj = Project::new_multi_wall("SVG Test", true, ScalePreset::Scale1_12, DisplayUnit::Mm);
+    let mut proj =
+        Project::new_multi_wall("SVG Test", true, ScalePreset::Scale1_12, DisplayUnit::Mm);
     let comps = proj.components.clone();
     proj.walls[0].generate_auto_dimensions(&comps);
     let wall_svg = write_wall_svg_to_string(&proj.walls[0], &proj.components);
@@ -70,7 +69,12 @@ fn svg_1to1_cutting_templates_and_wall_sheets_are_valid() {
 
 #[test]
 fn multi_page_standard_paper_pdf_tiles_walls_and_supports_unique_vs_all_instances() {
-    let mut proj = Project::new_multi_wall("Georgian Manor", true, ScalePreset::Scale1_12, DisplayUnit::Mm);
+    let mut proj = Project::new_multi_wall(
+        "Georgian Manor",
+        true,
+        ScalePreset::Scale1_12,
+        DisplayUnit::Mm,
+    );
     let comps = proj.components.clone();
     proj.walls[0].generate_auto_dimensions(&comps);
 
@@ -112,7 +116,8 @@ fn multi_page_standard_paper_pdf_tiles_walls_and_supports_unique_vs_all_instance
 
 #[test]
 fn project_booklet_and_single_piece_standard_pdf_generate_cleanly() {
-    let mut proj = Project::new_multi_wall("Whole House", true, ScalePreset::Scale1_12, DisplayUnit::Mm);
+    let mut proj =
+        Project::new_multi_wall("Whole House", true, ScalePreset::Scale1_12, DisplayUnit::Mm);
     let cid = proj.components[0].id.clone();
     let w2 = proj.add_wall("Garden Wall", 260.0, 220.0, 6.0, 0.40);
     proj.place_component_instance(&w2, &cid, Some("Garden Parlor"), 60.0, 62.0)

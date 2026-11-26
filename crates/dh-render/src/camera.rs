@@ -1,5 +1,5 @@
-use dh_geometry::GeneratedWindow;
 use dh_core::ViewMode;
+use dh_geometry::GeneratedWindow;
 use eframe::egui;
 use glam::{Mat4, Vec3, Vec4};
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
@@ -96,7 +96,10 @@ impl OrbitCamera {
     }
 
     pub fn reset_for_mode(&mut self, mode: ViewMode, window: &GeneratedWindow) {
-        let span = window.params.opening_width.max(window.params.opening_height) as f32;
+        let span = window
+            .params
+            .opening_width
+            .max(window.params.opening_height) as f32;
         self.goal = None;
         match mode {
             ViewMode::PrintPlate => {
@@ -203,7 +206,12 @@ impl OrbitCamera {
         ))
     }
 
-    pub fn screen_ray(&self, rect: egui::Rect, pos: egui::Pos2, z_far: f32) -> Option<(Vec3, Vec3)> {
+    pub fn screen_ray(
+        &self,
+        rect: egui::Rect,
+        pos: egui::Pos2,
+        z_far: f32,
+    ) -> Option<(Vec3, Vec3)> {
         if rect.width() <= 1.0 || rect.height() <= 1.0 {
             return None;
         }

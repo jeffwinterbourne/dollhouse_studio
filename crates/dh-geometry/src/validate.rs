@@ -26,10 +26,16 @@ pub fn validate_generated_piece(piece: &GeneratedWindow) -> ValidationSummary {
                 total_triangles += diag.triangle_count;
                 total_overhangs += diag.overhang_triangles;
                 if diag.overhang_triangles > 0 {
-                    errors.push(format!("{label}: {} overhang triangle(s)", diag.overhang_triangles));
+                    errors.push(format!(
+                        "{label}: {} overhang triangle(s)",
+                        diag.overhang_triangles
+                    ));
                 }
                 if diag.min_z.abs() > 1e-3 {
-                    errors.push(format!("{label}: not seated on Z=0 (min_z={:.3})", diag.min_z));
+                    errors.push(format!(
+                        "{label}: not seated on Z=0 (min_z={:.3})",
+                        diag.min_z
+                    ));
                 }
             }
             Err(e) => errors.push(format!("{label}: {e}")),

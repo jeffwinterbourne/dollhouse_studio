@@ -168,7 +168,9 @@ pub fn draw_piece_inspector_body(
         }
 
         if params.style.supports_sill()
-            && ui.checkbox(&mut params.sill_enabled, "Exterior Projecting Sill").changed()
+            && ui
+                .checkbox(&mut params.sill_enabled, "Exterior Projecting Sill")
+                .changed()
         {
             res.live_changed = true;
             res.immediate_commit_label = Some("Toggle sill");
@@ -176,12 +178,17 @@ pub fn draw_piece_inspector_body(
 
         if params.style.is_door() {
             ui.horizontal(|ui| {
-                if ui.checkbox(&mut params.double_doors, "Double Door").changed() {
+                if ui
+                    .checkbox(&mut params.double_doors, "Double Door")
+                    .changed()
+                {
                     res.live_changed = true;
                     res.immediate_commit_label = Some("Toggle double doors");
                 }
                 if !params.double_doors
-                    && ui.checkbox(&mut params.hinge_right, "Hinge Right").changed()
+                    && ui
+                        .checkbox(&mut params.hinge_right, "Hinge Right")
+                        .changed()
                 {
                     res.live_changed = true;
                     res.immediate_commit_label = Some("Flip door hinge");
@@ -222,10 +229,12 @@ pub fn draw_piece_inspector_body(
                     (rgb[2] * 255.0) as u8,
                 );
                 let active = *color_ref == fc;
-                let (r, resp) = ui.allocate_exact_size(egui::Vec2::splat(14.0), egui::Sense::click());
+                let (r, resp) =
+                    ui.allocate_exact_size(egui::Vec2::splat(14.0), egui::Sense::click());
                 ui.painter().circle_filled(r.center(), 6.0, c32);
                 if active {
-                    ui.painter().circle_stroke(r.center(), 7.5, Stroke::new(1.5, pal.gold));
+                    ui.painter()
+                        .circle_stroke(r.center(), 7.5, Stroke::new(1.5, pal.gold));
                 }
                 if resp.on_hover_text(fc.name()).clicked() {
                     *color_ref = fc;
@@ -267,7 +276,10 @@ pub fn draw_piece_inspector_body(
                 .selected_text(params.groove_style.name())
                 .show_ui(ui, |ui| {
                     for gr in GrooveStyle::ALL {
-                        if ui.selectable_label(params.groove_style == gr, gr.name()).clicked() {
+                        if ui
+                            .selectable_label(params.groove_style == gr, gr.name())
+                            .clicked()
+                        {
                             params.groove_style = gr;
                             res.live_changed = true;
                             res.immediate_commit_label = Some("Change architrave groove");
@@ -278,7 +290,10 @@ pub fn draw_piece_inspector_body(
                 .selected_text(params.shutter_style.name())
                 .show_ui(ui, |ui| {
                     for sh in ShutterStyle::ALL {
-                        if ui.selectable_label(params.shutter_style == sh, sh.name()).clicked() {
+                        if ui
+                            .selectable_label(params.shutter_style == sh, sh.name())
+                            .clicked()
+                        {
                             params.shutter_style = sh;
                             res.live_changed = true;
                             res.immediate_commit_label = Some("Change shutters");
@@ -289,7 +304,10 @@ pub fn draw_piece_inspector_body(
                 .selected_text(params.header_style.name())
                 .show_ui(ui, |ui| {
                     for hd in HeaderStyle::ALL {
-                        if ui.selectable_label(params.header_style == hd, hd.name()).clicked() {
+                        if ui
+                            .selectable_label(params.header_style == hd, hd.name())
+                            .clicked()
+                        {
                             params.header_style = hd;
                             res.live_changed = true;
                             res.immediate_commit_label = Some("Change classical header");
@@ -299,7 +317,10 @@ pub fn draw_piece_inspector_body(
             if params.sill_enabled
                 && params.style.supports_sill()
                 && ui
-                    .checkbox(&mut params.flower_box_enabled, "Attached Planter / Flower Box")
+                    .checkbox(
+                        &mut params.flower_box_enabled,
+                        "Attached Planter / Flower Box",
+                    )
                     .changed()
             {
                 res.live_changed = true;
@@ -339,7 +360,10 @@ pub fn draw_piece_inspector_body(
                 res.drag_commit_label = Some("Change glazing bar width");
             }
             if ui
-                .checkbox(&mut params.match_interior_trim, "Match Interior Trim to Exterior")
+                .checkbox(
+                    &mut params.match_interior_trim,
+                    "Match Interior Trim to Exterior",
+                )
                 .changed()
             {
                 res.live_changed = true;
@@ -371,7 +395,11 @@ pub fn draw_piece_inspector_body(
             }
 
             ui.separator();
-            ui.label(RichText::new("Flush Wall Feature Trimming").small().color(pal.text_muted));
+            ui.label(
+                RichText::new("Flush Wall Feature Trimming")
+                    .small()
+                    .color(pal.text_muted),
+            );
             egui::ComboBox::from_id_salt("insp_flush_top")
                 .selected_text(params.flush_top_mode.name())
                 .show_ui(ui, |ui| {
@@ -438,11 +466,17 @@ pub fn draw_piece_inspector_body(
                     res.live_changed = true;
                     res.drag_commit_label = Some("Change door kick panel");
                 }
-                if ui.checkbox(&mut params.letterbox_enabled, "Letterbox Slot").changed() {
+                if ui
+                    .checkbox(&mut params.letterbox_enabled, "Letterbox Slot")
+                    .changed()
+                {
                     res.live_changed = true;
                     res.immediate_commit_label = Some("Toggle letterbox");
                 }
-                if ui.checkbox(&mut params.cat_flap_enabled, "Pet / Cat Flap").changed() {
+                if ui
+                    .checkbox(&mut params.cat_flap_enabled, "Pet / Cat Flap")
+                    .changed()
+                {
                     res.live_changed = true;
                     res.immediate_commit_label = Some("Toggle cat flap");
                 }
@@ -502,7 +536,10 @@ pub fn draw_piece_inspector_body(
     let val = validate_generated_piece(&built);
     egui::Frame::NONE
         .fill(pal.surface_card)
-        .stroke(Stroke::new(1.0, if val.is_valid { pal.border } else { pal.danger }))
+        .stroke(Stroke::new(
+            1.0,
+            if val.is_valid { pal.border } else { pal.danger },
+        ))
         .corner_radius(CornerRadius::same(7))
         .inner_margin(Margin::same(8))
         .show(ui, |ui| {
@@ -514,7 +551,11 @@ pub fn draw_piece_inspector_body(
                 })
                 .small()
                 .strong()
-                .color(if val.is_valid { pal.success } else { pal.danger }),
+                .color(if val.is_valid {
+                    pal.success
+                } else {
+                    pal.danger
+                }),
             );
             ui.label(
                 RichText::new(format!(
@@ -561,9 +602,11 @@ pub fn draw_wall_inspector(
                                     .color(pal.accent),
                             );
                             ui.label(
-                                RichText::new("Changes here update every linked instance across all walls.")
-                                    .small()
-                                    .color(pal.text_secondary),
+                                RichText::new(
+                                    "Changes here update every linked instance across all walls.",
+                                )
+                                .small()
+                                .color(pal.text_secondary),
                             );
                         });
                     ui.add_space(6.0);
@@ -621,7 +664,9 @@ pub fn draw_wall_inspector(
             if selected_ids.len() == 1 {
                 let op_id = selected_ids[0].clone();
                 if let Some(op_idx) = wall.openings.iter().position(|o| o.id == op_id) {
-                    let comp_id_opt = wall.openings[op_idx].component_id().map(ToString::to_string);
+                    let comp_id_opt = wall.openings[op_idx]
+                        .component_id()
+                        .map(ToString::to_string);
 
                     // Wall Placement Card (X/Y & Locks)
                     section_card(ui, pal, Some("Wall Placement"), |ui| {
@@ -698,7 +743,8 @@ pub fn draw_wall_inspector(
                                     );
                                 });
                                 if ui.small_button("Make Unique (Unlink)").clicked() {
-                                    res.action = Some(InspectorAction::MakeOpeningUnique(op_id.clone()));
+                                    res.action =
+                                        Some(InspectorAction::MakeOpeningUnique(op_id.clone()));
                                 }
                             });
                         ui.add_space(6.0);
@@ -716,8 +762,9 @@ pub fn draw_wall_inspector(
                                     &mut res,
                                 );
                             }
-                        } else if let OpeningSource::Component { ref mut overrides, .. } =
-                            wall.openings[op_idx].source
+                        } else if let OpeningSource::Component {
+                            ref mut overrides, ..
+                        } = wall.openings[op_idx].source
                         {
                             draw_instance_overrides_card(ui, pal, overrides, unit, &mut res);
                         }
@@ -728,9 +775,8 @@ pub fn draw_wall_inspector(
                                 .on_hover_text("Link instances across this or multiple walls")
                                 .clicked()
                             {
-                                res.action = Some(InspectorAction::PromoteOpeningToComponent(
-                                    op_id.clone(),
-                                ));
+                                res.action =
+                                    Some(InspectorAction::PromoteOpeningToComponent(op_id.clone()));
                             }
                         });
                         let mut tmp_name = wall.openings[op_idx].name.clone();
@@ -770,7 +816,14 @@ pub fn draw_wall_inspector(
                     res.live_changed = true;
                     res.drag_commit_label = Some("Resize wall width");
                 }
-                if slider_unit_mm(ui, pal, "Wall Height", &mut wall.height, 80.0..=1000.0, unit) {
+                if slider_unit_mm(
+                    ui,
+                    pal,
+                    "Wall Height",
+                    &mut wall.height,
+                    80.0..=1000.0,
+                    unit,
+                ) {
                     res.live_changed = true;
                     res.drag_commit_label = Some("Resize wall height");
                 }
@@ -850,7 +903,9 @@ pub fn draw_wall_inspector(
                     ui.horizontal(|ui| {
                         ui.label("Floor Level");
                         if ui
-                            .add(egui::DragValue::new(&mut wall.placement_3d.floor_level).speed(0.1))
+                            .add(
+                                egui::DragValue::new(&mut wall.placement_3d.floor_level).speed(0.1),
+                            )
                             .changed()
                         {
                             res.live_changed = true;
@@ -911,31 +966,43 @@ fn draw_instance_overrides_card(
 ) {
     section_card(ui, pal, Some("Per-Instance Exceptions"), |ui| {
         let mut wt_ovr = overrides.wall_thickness.is_some();
-        if ui.checkbox(&mut wt_ovr, "Override Wall Thickness").changed() {
+        if ui
+            .checkbox(&mut wt_ovr, "Override Wall Thickness")
+            .changed()
+        {
             overrides.wall_thickness = if wt_ovr { Some(9.0) } else { None };
             res.live_changed = true;
             res.immediate_commit_label = Some("Toggle wall thickness override");
         }
         if let Some(ref mut wt) = overrides.wall_thickness
-            && slider_unit_mm(ui, pal, "Instance Wall", wt, 3.0..=24.0, unit) {
-                res.live_changed = true;
-                res.drag_commit_label = Some("Edit instance wall thickness");
-            }
+            && slider_unit_mm(ui, pal, "Instance Wall", wt, 3.0..=24.0, unit)
+        {
+            res.live_changed = true;
+            res.drag_commit_label = Some("Edit instance wall thickness");
+        }
 
         let mut hinge_ovr = overrides.hinge_right.is_some();
-        if ui.checkbox(&mut hinge_ovr, "Override Door Hinge Side").changed() {
+        if ui
+            .checkbox(&mut hinge_ovr, "Override Door Hinge Side")
+            .changed()
+        {
             overrides.hinge_right = if hinge_ovr { Some(true) } else { None };
             res.live_changed = true;
             res.immediate_commit_label = Some("Toggle hinge override");
         }
         if let Some(ref mut hr) = overrides.hinge_right
-            && ui.checkbox(hr, "Hinge Right").changed() {
-                res.live_changed = true;
-                res.immediate_commit_label = Some("Flip instance hinge");
-            }
+            && ui.checkbox(hr, "Hinge Right").changed()
+        {
+            res.live_changed = true;
+            res.immediate_commit_label = Some("Flip instance hinge");
+        }
 
         ui.separator();
-        ui.label(RichText::new("Flush Edge Overrides").small().color(pal.text_muted));
+        ui.label(
+            RichText::new("Flush Edge Overrides")
+                .small()
+                .color(pal.text_muted),
+        );
         let mut fs = overrides.flush_bottom_sill.unwrap_or(false);
         let mut fl = overrides.flush_left_jamb.unwrap_or(false);
         let mut fr = overrides.flush_right_jamb.unwrap_or(false);

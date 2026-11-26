@@ -1,3 +1,6 @@
+use crate::builders::window::{
+    build_exterior_addons, build_wall_cutaway_mesh, clip_exterior_trim_for_flush_wall,
+};
 use crate::extrude::{
     MouldingConfig, Slab, TriMesh, VGroove, extrude_slabs, extrude_slabs_with_moulding,
 };
@@ -5,9 +8,6 @@ use crate::polygon2d::{
     Contour2D, ProfileKind, circle_contour, difference_shapes, intersection_shapes, profile_band,
     profile_contour, rect_bounds, rect_centered, ring_shape, segment_bar, shape_from_contour,
     union_contours, union_shapes,
-};
-use crate::builders::window::{
-    build_exterior_addons, build_wall_cutaway_mesh, clip_exterior_trim_for_flush_wall,
 };
 use dh_core::{DoorHandleStyle, WindowParams, WindowSpecs, WindowStyle};
 use std::f32::consts::{FRAC_PI_2, PI as PI32};
@@ -92,11 +92,14 @@ pub fn build_door_assembly(
     //   remaining to exterior face: door-stop ledge (stop_inner)
     let int_pin_cover = 0.65;
     let ext_total = params.trim_thickness + specs.effective_wall_thickness - 0.4;
-    let int_total = params.interior_trim_thickness + (specs.effective_wall_thickness * 0.48).max(1.8);
-    let door_recess_from_ext = (params.trim_thickness + specs.effective_wall_thickness - int_pin_cover - door_t - 0.25)
-        .max(params.trim_thickness + 0.9);
-    let ext_pin_floor = (params.trim_thickness + specs.effective_wall_thickness - int_pin_cover - 2.4)
-        .max(door_recess_from_ext);
+    let int_total =
+        params.interior_trim_thickness + (specs.effective_wall_thickness * 0.48).max(1.8);
+    let door_recess_from_ext =
+        (params.trim_thickness + specs.effective_wall_thickness - int_pin_cover - door_t - 0.25)
+            .max(params.trim_thickness + 0.9);
+    let ext_pin_floor =
+        (params.trim_thickness + specs.effective_wall_thickness - int_pin_cover - 2.4)
+            .max(door_recess_from_ext);
 
     // Determine hinge X positions for single or double doors
     let left_hinge_x0 = -inner_w * 0.5 + clr + pin_inset_from_edge;
@@ -169,7 +172,14 @@ pub fn build_door_assembly(
         0.0,
         None,
     );
-    let ext_stop_band = profile_band(kind, w, h, -(params.frame_width + stop_lip), 0.0, ARC_SEGMENTS);
+    let ext_stop_band = profile_band(
+        kind,
+        w,
+        h,
+        -(params.frame_width + stop_lip),
+        0.0,
+        ARC_SEGMENTS,
+    );
     let ext_trim_with_addons = clip_exterior_trim_for_flush_wall(
         &union_shapes(&ext_trim_with_sill, &ext_addons),
         &ext_stop_band,
@@ -184,7 +194,10 @@ pub fn build_door_assembly(
     let ext_barrel_notched = difference_shapes(&ext_barrel_band, &socket_shapes);
 
     let mut ext_slabs = Vec::new();
-    if params.architrave_style.has_step() && params.trim_thickness >= 1.5 && params.trim_width >= 2.2 {
+    if params.architrave_style.has_step()
+        && params.trim_thickness >= 1.5
+        && params.trim_width >= 2.2
+    {
         let tier1_z = (params.trim_thickness * 0.58).max(specs.effective_ext_chamfer * 1.15 + 0.25);
         let step_inset = (params.trim_width * 0.36).clamp(0.5, 2.2);
         let stepped_band = profile_band(
@@ -313,8 +326,14 @@ pub fn build_door_assembly(
         ARC_SEGMENTS,
     );
     let int_trim_notched = difference_shapes(&int_trim_band, &int_socket_shapes);
-    let int_spigot_band =
-        profile_band(kind, w, h, -params.frame_width, int_spigot_outer_offset, ARC_SEGMENTS);
+    let int_spigot_band = profile_band(
+        kind,
+        w,
+        h,
+        -params.frame_width,
+        int_spigot_outer_offset,
+        ARC_SEGMENTS,
+    );
     let int_spigot_notched = difference_shapes(&int_spigot_band, &int_socket_shapes);
 
     let mut int_slabs = Vec::new();
@@ -577,7 +596,8 @@ fn build_single_leaf(
     let is_glazed = matches!(
         params.style,
         WindowStyle::DoorGlazedFrench | WindowStyle::DoorFanlightGeorgian
-    ) || (params.style == WindowStyle::DoorArchedHeritage && params.bars_x + params.bars_y > 0);
+    ) || (params.style == WindowStyle::DoorArchedHeritage
+        && params.bars_x + params.bars_y > 0);
     let half_w_inset = (leaf_w * 0.16).clamp(4.0, 10.0);
     let (glass_y_bot, glass_y_top) = if params.style == WindowStyle::DoorFanlightGeorgian {
         let top = leaf_h * 0.5 - half_w_inset.max(5.5);
@@ -674,7 +694,8 @@ fn build_single_leaf(
         let glass_cy = (glass_y_bot + glass_y_top) * 0.5;
 
         let (glass_shape, bar_shapes) = if params.style == WindowStyle::DoorFanlightGeorgian {
-            let mut fan_contour = profile_contour(ProfileKind::HalfRoundArch, glass_w, glass_h, 0.0, 28);
+            let mut fan_contour =
+                profile_contour(ProfileKind::HalfRoundArch, glass_w, glass_h, 0.0, 28);
             for p in &mut fan_contour {
                 p[1] += glass_cy;
             }
@@ -789,12 +810,18 @@ fn build_single_leaf(
             &handle_hole,
         );
         let body_no_pins_face = difference_shapes(
-            &difference_shapes(&shape_from_contour(leaf_body_contour.clone()), &glass_with_bars),
+            &difference_shapes(
+                &shape_from_contour(leaf_body_contour.clone()),
+                &glass_with_bars,
+            ),
             &handle_hole,
         );
         let ac_pocket_cut = shape_from_contour(rect_centered(0.0, glass_cy, ac_w, ac_h));
         let int_rim_region = difference_shapes(
-            &difference_shapes(&shape_from_contour(leaf_body_contour.clone()), &ac_pocket_cut),
+            &difference_shapes(
+                &shape_from_contour(leaf_body_contour.clone()),
+                &ac_pocket_cut,
+            ),
             &handle_hole,
         );
 
@@ -856,12 +883,8 @@ fn build_single_leaf(
             &difference_shapes(&shape_from_contour(ext_leaf_contour), &glass_with_bars),
             &ext_cut_shapes,
         );
-        let ext_spigot_outer = shape_from_contour(rect_centered(
-            0.0,
-            glass_cy,
-            ac_w - 0.25,
-            ac_h - 0.25,
-        ));
+        let ext_spigot_outer =
+            shape_from_contour(rect_centered(0.0, glass_cy, ac_w - 0.25, ac_h - 0.25));
         let ext_spigot_region = difference_shapes(&ext_spigot_outer, &glass_with_bars);
         let ext_slabs = vec![
             Slab {
@@ -1221,9 +1244,21 @@ fn build_single_handle_and_plate_for_style(style: DoorHandleStyle) -> TriMesh {
             let spindle = shape_from_contour(rect_centered(0.0, 0.0, 1.7, 1.7));
             let knob_mesh = extrude_slabs_with_moulding(
                 &[
-                    Slab { z0: 0.0, z1: 1.4, region: head },
-                    Slab { z0: 1.4, z1: 2.5, region: neck },
-                    Slab { z0: 2.5, z1: 5.8, region: spindle },
+                    Slab {
+                        z0: 0.0,
+                        z1: 1.4,
+                        region: head,
+                    },
+                    Slab {
+                        z0: 1.4,
+                        z1: 2.5,
+                        region: neck,
+                    },
+                    Slab {
+                        z0: 2.5,
+                        z1: 5.8,
+                        region: spindle,
+                    },
                 ],
                 &MouldingConfig {
                     outer_chamfer: Some((0.36, 0.42)),
@@ -1360,7 +1395,12 @@ fn build_printable_cat_flap_bezel(cf_w: f64, cf_h: f64) -> TriMesh {
 }
 
 fn build_printable_cat_flap_door(cf_w: f64, cf_h: f64) -> TriMesh {
-    let flap = shape_from_contour(rect_centered(0.0, 0.0, (cf_w - 0.6).max(4.0), (cf_h - 0.6).max(4.0)));
+    let flap = shape_from_contour(rect_centered(
+        0.0,
+        0.0,
+        (cf_w - 0.6).max(4.0),
+        (cf_h - 0.6).max(4.0),
+    ));
     extrude_slabs_with_moulding(
         &[Slab {
             z0: 0.0,
@@ -1388,9 +1428,17 @@ fn build_assembled_leaf_hardware(
     let mut acc = TriMesh::default();
 
     // Helper: places a z-extruded face plate flush on interior (+Z at z=0) & exterior (-Z at z=-leaf_t)
-    let add_paired_plate = |target: &mut TriMesh, region: &crate::polygon2d::Shapes2D, thick: f64, cx: f64, cy: f64| {
+    let add_paired_plate = |target: &mut TriMesh,
+                            region: &crate::polygon2d::Shapes2D,
+                            thick: f64,
+                            cx: f64,
+                            cy: f64| {
         let mut m_ext = extrude_slabs_with_moulding(
-            &[Slab { z0: 0.0, z1: thick, region: region.clone() }],
+            &[Slab {
+                z0: 0.0,
+                z1: thick,
+                region: region.clone(),
+            }],
             &MouldingConfig {
                 outer_chamfer: Some((0.20, 0.24)),
                 hole_chamfer: None,
@@ -1401,7 +1449,11 @@ fn build_assembled_leaf_hardware(
         target.append(&m_ext);
 
         let mut m_int = extrude_slabs_with_moulding(
-            &[Slab { z0: 0.0, z1: thick, region: region.clone() }],
+            &[Slab {
+                z0: 0.0,
+                z1: thick,
+                region: region.clone(),
+            }],
             &MouldingConfig {
                 outer_chamfer: Some((0.20, 0.24)),
                 hole_chamfer: None,
@@ -1419,7 +1471,11 @@ fn build_assembled_leaf_hardware(
         // Interior mount (+Z outward, peg into -Z)
         let dir_int = if hinge_right { 1.0f32 } else { -1.0f32 };
         let mut int_m = extrude_slabs_with_moulding(
-            &[Slab { z0: 0.0, z1: w, region: lever_xy.clone() }],
+            &[Slab {
+                z0: 0.0,
+                z1: w,
+                region: lever_xy.clone(),
+            }],
             &MouldingConfig {
                 outer_chamfer: Some((0.18, 0.22)),
                 hole_chamfer: None,
@@ -1439,7 +1495,11 @@ fn build_assembled_leaf_hardware(
 
         // Exterior mount (-Z outward): flip to opposite X then rotate_y(PI) -> points along `dir_int`
         let mut ext_m = extrude_slabs_with_moulding(
-            &[Slab { z0: 0.0, z1: w, region: lever_xy.clone() }],
+            &[Slab {
+                z0: 0.0,
+                z1: w,
+                region: lever_xy.clone(),
+            }],
             &MouldingConfig {
                 outer_chamfer: Some((0.18, 0.22)),
                 hole_chamfer: None,
@@ -1461,7 +1521,13 @@ fn build_assembled_leaf_hardware(
 
     match style {
         DoorHandleStyle::ModernLever => {
-            add_paired_plate(&mut hw, &shape_from_contour(rect_centered(0.0, 0.0, 3.8, 11.4)), 0.85, hx, hy);
+            add_paired_plate(
+                &mut hw,
+                &shape_from_contour(rect_centered(0.0, 0.0, 3.8, 11.4)),
+                0.85,
+                hx,
+                hy,
+            );
             let lever_xy = union_contours(&[
                 rect_bounds(-0.85, -2.0, 0.85, 0.4),
                 rect_bounds(-1.0, 0.2, 8.2, 1.75),
@@ -1486,14 +1552,28 @@ fn build_assembled_leaf_hardware(
             add_paired_lever(&mut hw, &scroll_xy, 1.65);
         }
         DoorHandleStyle::RoundKnob => {
-            add_paired_plate(&mut hw, &shape_from_contour(circle_contour(0.0, 0.0, 3.3, 24)), 0.9, hx, hy);
+            add_paired_plate(
+                &mut hw,
+                &shape_from_contour(circle_contour(0.0, 0.0, 3.3, 24)),
+                0.9,
+                hx,
+                hy,
+            );
             let head = shape_from_contour(circle_contour(0.0, 0.0, 2.6, 24));
             let neck = shape_from_contour(circle_contour(0.0, 0.0, 1.45, 20));
             let build_knob = || {
                 extrude_slabs_with_moulding(
                     &[
-                        Slab { z0: 0.0, z1: 1.5, region: head.clone() },
-                        Slab { z0: 1.5, z1: 2.8, region: neck.clone() },
+                        Slab {
+                            z0: 0.0,
+                            z1: 1.5,
+                            region: head.clone(),
+                        },
+                        Slab {
+                            z0: 1.5,
+                            z1: 2.8,
+                            region: neck.clone(),
+                        },
                     ],
                     &MouldingConfig {
                         outer_chamfer: Some((0.36, 0.42)),
@@ -1517,21 +1597,43 @@ fn build_assembled_leaf_hardware(
                 &vec![ring_shape(0.0, -3.5, 2.2, 3.8, 28)],
                 &shape_from_contour(rect_bounds(-1.0, -0.3, 1.0, 1.3)),
             );
-            let mut r_ext = extrude_slabs(&[Slab { z0: 0.0, z1: 1.4, region: ring.clone() }]);
+            let mut r_ext = extrude_slabs(&[Slab {
+                z0: 0.0,
+                z1: 1.4,
+                region: ring.clone(),
+            }]);
             r_ext.translate(hx as f32, hy as f32, -(leaf_t + 2.2) as f32);
             hw.append(&r_ext);
-            let mut r_int = extrude_slabs(&[Slab { z0: 0.0, z1: 1.4, region: ring }]);
+            let mut r_int = extrude_slabs(&[Slab {
+                z0: 0.0,
+                z1: 1.4,
+                region: ring,
+            }]);
             r_int.translate(hx as f32, hy as f32, 0.8);
             hw.append(&r_int);
         }
         DoorHandleStyle::PullBar => {
-            add_paired_plate(&mut hw, &shape_from_contour(rect_centered(0.0, 0.0, 3.4, 17.5)), 0.85, hx, hy);
+            add_paired_plate(
+                &mut hw,
+                &shape_from_contour(rect_centered(0.0, 0.0, 3.4, 17.5)),
+                0.85,
+                hx,
+                hy,
+            );
             let bar = shape_from_contour(rect_centered(0.0, 0.0, 2.0, 14.5));
             let s_top = shape_from_contour(rect_centered(0.0, 5.05, 1.8, 1.8));
             let s_bot = shape_from_contour(rect_centered(0.0, -5.05, 1.8, 1.8));
             let build_pull = || {
-                let mut m = extrude_slabs(&[Slab { z0: 0.0, z1: 1.8, region: bar.clone() }]);
-                let st = extrude_slabs(&[Slab { z0: 1.8, z1: 4.0, region: union_shapes(&s_top, &s_bot) }]);
+                let mut m = extrude_slabs(&[Slab {
+                    z0: 0.0,
+                    z1: 1.8,
+                    region: bar.clone(),
+                }]);
+                let st = extrude_slabs(&[Slab {
+                    z0: 1.8,
+                    z1: 4.0,
+                    region: union_shapes(&s_top, &s_bot),
+                }]);
                 m.append(&st);
                 m
             };
@@ -1548,13 +1650,25 @@ fn build_assembled_leaf_hardware(
 
     if let Some((lb_y, lb_w, lb_h)) = letterbox_placement {
         let lb_outer = shape_from_contour(rect_centered(0.0, 0.0, lb_w + 4.4, lb_h + 3.6));
-        let lb_slit = shape_from_contour(rect_centered(0.0, 0.0, lb_w * 0.92, (lb_h * 0.65).max(1.5)));
-        add_paired_plate(&mut hw, &difference_shapes(&lb_outer, &lb_slit), 0.95, 0.0, lb_y);
+        let lb_slit =
+            shape_from_contour(rect_centered(0.0, 0.0, lb_w * 0.92, (lb_h * 0.65).max(1.5)));
+        add_paired_plate(
+            &mut hw,
+            &difference_shapes(&lb_outer, &lb_slit),
+            0.95,
+            0.0,
+            lb_y,
+        );
         // Brass inner letter flap on exterior
         let mut flap = extrude_slabs(&[Slab {
             z0: 0.0,
             z1: 0.6,
-            region: shape_from_contour(rect_centered(0.0, 0.0, lb_w * 0.88, (lb_h * 0.55).max(1.2))),
+            region: shape_from_contour(rect_centered(
+                0.0,
+                0.0,
+                lb_w * 0.88,
+                (lb_h * 0.55).max(1.2),
+            )),
         }]);
         flap.translate(0.0, lb_y as f32, -(leaf_t + 0.65) as f32);
         hw.append(&flap);
@@ -1563,11 +1677,22 @@ fn build_assembled_leaf_hardware(
     if let Some((cf_cy, cf_w, cf_h)) = cat_flap_placement {
         let cf_outer = shape_from_contour(rect_centered(0.0, 0.0, cf_w + 3.6, cf_h + 3.6));
         let cf_hole = shape_from_contour(rect_centered(0.0, 0.0, cf_w, cf_h));
-        add_paired_plate(&mut acc, &difference_shapes(&cf_outer, &cf_hole), 1.05, 0.0, cf_cy);
+        add_paired_plate(
+            &mut acc,
+            &difference_shapes(&cf_outer, &cf_hole),
+            1.05,
+            0.0,
+            cf_cy,
+        );
         let mut inner_flap = extrude_slabs(&[Slab {
             z0: 0.0,
             z1: 1.2,
-            region: shape_from_contour(rect_centered(0.0, 0.0, (cf_w - 0.8).max(4.0), (cf_h - 0.8).max(4.0))),
+            region: shape_from_contour(rect_centered(
+                0.0,
+                0.0,
+                (cf_w - 0.8).max(4.0),
+                (cf_h - 0.8).max(4.0),
+            )),
         }]);
         inner_flap.translate(0.0, cf_cy as f32, -(leaf_t * 0.5 + 0.6) as f32);
         acc.append(&inner_flap);

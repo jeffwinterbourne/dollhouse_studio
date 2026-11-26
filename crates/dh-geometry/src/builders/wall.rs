@@ -23,7 +23,11 @@ pub struct WallMeshCache {
 }
 
 impl WallMeshCache {
-    pub fn build_wall(&mut self, wall: &ProjectWall, components: &[ComponentDef]) -> BuiltProjectWall {
+    pub fn build_wall(
+        &mut self,
+        wall: &ProjectWall,
+        components: &[ComponentDef],
+    ) -> BuiltProjectWall {
         let mut cutouts: Shapes2D = Vec::new();
         let mut placed_openings = Vec::with_capacity(wall.openings.len());
 
@@ -33,7 +37,8 @@ impl WallMeshCache {
 
         for op in &wall.openings {
             let resolved = op.resolve_params(components);
-            let win_gen = if let Some((cached_params, cached_win)) = self.opening_cache.get(&op.id) {
+            let win_gen = if let Some((cached_params, cached_win)) = self.opening_cache.get(&op.id)
+            {
                 if cached_params == &resolved {
                     Arc::clone(cached_win)
                 } else {

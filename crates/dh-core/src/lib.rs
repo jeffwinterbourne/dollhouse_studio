@@ -19,6 +19,4 @@ pub use project::{
 };
 pub use template::{PieceTemplate, TemplateCategory, TemplateScope};
 pub use units::DisplayUnit;
-pub use wall::{
-    ProjectWall, WallDimension, WallOpening, WallPhotoConfig, WallPlacement3D,
-};
+pub use wall::{ProjectWall, WallDimension, WallOpening, WallPhotoConfig, WallPlacement3D};

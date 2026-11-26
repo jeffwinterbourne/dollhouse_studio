@@ -35,8 +35,10 @@ pub fn draw_opening_quick_bar(
     } else {
         (selection_screen_rect.bottom() + 8.0).min(canvas_rect.bottom() - 42.0)
     };
-    let x = (selection_screen_rect.center().x - est_w * 0.5)
-        .clamp(canvas_rect.left() + 8.0, (canvas_rect.right() - est_w - 8.0).max(canvas_rect.left() + 8.0));
+    let x = (selection_screen_rect.center().x - est_w * 0.5).clamp(
+        canvas_rect.left() + 8.0,
+        (canvas_rect.right() - est_w - 8.0).max(canvas_rect.left() + 8.0),
+    );
 
     let mut action = None;
     let area_id = ui.scope_id().with("opening_quick_action_bar");

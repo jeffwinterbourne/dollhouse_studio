@@ -1,4 +1,6 @@
-use dh_core::{ComponentDef, DisplayUnit, Project, ProjectKind, ProjectWall, WindowOpeningMode, WindowParams};
+use dh_core::{
+    ComponentDef, DisplayUnit, Project, ProjectKind, ProjectWall, WindowOpeningMode, WindowParams,
+};
 use dh_geometry::{
     Contour2D, GeneratedWindow, ProfileKind, build_window, clipped_trim_outer_contour,
     profile_contour, profile_kind,
@@ -416,7 +418,15 @@ impl PdfPage {
             let iy = y0 + 3.3 + row as f64 * 4.5;
             self.set_stroke(col[0], col[1], col[2], 0.50, *dashed);
             self.draw_line(ix, iy, ix + 6.5, iy);
-            self.draw_text(ix + 8.0, iy + 0.8, label, 2.5, false, false, [0.25, 0.30, 0.36]);
+            self.draw_text(
+                ix + 8.0,
+                iy + 0.8,
+                label,
+                2.5,
+                false,
+                false,
+                [0.25, 0.30, 0.36],
+            );
         }
     }
 
@@ -569,8 +579,13 @@ fn build_template_card(
     let p = &built.params;
     let specs = &built.specs;
     let kind = profile_kind(p.style);
-    let cutout_contour =
-        profile_contour(kind, p.opening_width, p.opening_height, 0.0, PDF_ARC_SEGMENTS);
+    let cutout_contour = profile_contour(
+        kind,
+        p.opening_width,
+        p.opening_height,
+        0.0,
+        PDF_ARC_SEGMENTS,
+    );
     let trim_contour = clipped_trim_outer_contour(
         kind,
         specs.sleeve_outer_width,
@@ -615,8 +630,14 @@ fn build_template_card(
     let cut_pad_w = p.opening_width + 2.0 * (p.trim_width + 3.0);
     let cut_pad_h = p.opening_height + 2.0 * (p.trim_width + p.sill_depth + 3.0);
     let gap = 8.0;
-    let ac_w = acetate_contour.as_ref().map(|(_, w, _)| *w + 6.0).unwrap_or(0.0);
-    let ac_h = acetate_contour.as_ref().map(|(_, _, h)| *h + 6.0).unwrap_or(0.0);
+    let ac_w = acetate_contour
+        .as_ref()
+        .map(|(_, w, _)| *w + 6.0)
+        .unwrap_or(0.0);
+    let ac_h = acetate_contour
+        .as_ref()
+        .map(|(_, _, h)| *h + 6.0)
+        .unwrap_or(0.0);
 
     let inner_w = if acetate_contour.is_some() {
         cut_pad_w + gap + ac_w
@@ -720,7 +741,11 @@ fn append_tiled_wall_pages(
     let margin = opts.margin_mm.max(8.0);
     let pad_l = 12.0;
     let pad_r = 12.0;
-    let pad_t = if wall.dimensions.is_empty() { 10.0 } else { 20.0 };
+    let pad_t = if wall.dimensions.is_empty() {
+        10.0
+    } else {
+        20.0
+    };
     let pad_b = 10.0;
     let total_draw_w = wall.width + pad_l + pad_r;
     let total_draw_h = wall.height + pad_t + pad_b;
@@ -764,8 +789,7 @@ fn append_tiled_wall_pages(
                 unit.format_value(wall.wall_thickness),
                 unit.format_value(wall.acetate_thickness)
             );
-            let mut page =
-                PdfPage::new(page_w, page_h, title, subtitle, true, true, false);
+            let mut page = PdfPage::new(page_w, page_h, title, subtitle, true, true, false);
 
             let area_x0 = margin;
             let area_y0 = margin + header_h;
@@ -815,7 +839,15 @@ fn append_tiled_wall_pages(
                 );
                 page.set_stroke(0.851, 0.169, 0.169, 0.35, false);
                 page.draw_contour(&cut_c, cx, cy, Some([0.992, 0.945, 0.945]));
-                page.draw_text(cx, cy - 1.5, &op.name, 3.0, true, true, [0.122, 0.161, 0.216]);
+                page.draw_text(
+                    cx,
+                    cy - 1.5,
+                    &op.name,
+                    3.0,
+                    true,
+                    true,
+                    [0.122, 0.161, 0.216],
+                );
                 page.draw_text(
                     cx,
                     cy + 3.8,
@@ -953,8 +985,7 @@ fn append_packed_template_pages(
             cursor_y += row_h + gap;
             row_h = 0.0;
         }
-        if cursor_y > margin + header_h + 0.1
-            && cursor_y + card.box_h > page_h - margin - footer_h
+        if cursor_y > margin + header_h + 0.1 && cursor_y + card.box_h > page_h - margin - footer_h
         {
             doc.pages.push(page);
             page_num_local += 1;
@@ -1025,7 +1056,12 @@ fn draw_template_card(
     page.set_stroke(0.533, 0.600, 0.667, 0.25, true);
     page.draw_contour(&card.trim_contour, cut_cx, cut_cy, None);
     page.set_stroke(0.851, 0.169, 0.169, 0.35, false);
-    page.draw_contour(&card.cutout_contour, cut_cx, cut_cy, Some([0.992, 0.945, 0.945]));
+    page.draw_contour(
+        &card.cutout_contour,
+        cut_cx,
+        cut_cy,
+        Some([0.992, 0.945, 0.945]),
+    );
 
     if let Some((ref ac_c, aw, ah)) = card.acetate_contour {
         let ac_cx = x0 + 3.0 + cut_area_w + 8.0 + (card.box_w - cut_area_w - 14.0) * 0.5;
@@ -1097,7 +1133,15 @@ fn append_project_cover_bom_page(
     y += 8.0;
 
     if !project.walls.is_empty() {
-        page.draw_text(margin, y, "Wall Schedule", 3.4, true, false, [0.10, 0.20, 0.36]);
+        page.draw_text(
+            margin,
+            y,
+            "Wall Schedule",
+            3.4,
+            true,
+            false,
+            [0.10, 0.20, 0.36],
+        );
         y += 5.0;
         for w in &project.walls {
             page.draw_text(
@@ -1133,9 +1177,21 @@ fn append_project_cover_bom_page(
     );
     y += 5.5;
 
-    let col_x = [margin, margin + 44.0, margin + 84.0, margin + 120.0, margin + 154.0];
+    let col_x = [
+        margin,
+        margin + 44.0,
+        margin + 84.0,
+        margin + 120.0,
+        margin + 154.0,
+    ];
     page.set_stroke(0.75, 0.80, 0.88, 0.25, false);
-    page.fill_stroke_rect(margin, y - 3.8, page_w - 2.0 * margin, 5.5, Some([0.94, 0.96, 0.98]));
+    page.fill_stroke_rect(
+        margin,
+        y - 3.8,
+        page_w - 2.0 * margin,
+        5.5,
+        Some([0.94, 0.96, 0.98]),
+    );
     for (hdr, &x) in ["Item", "Style", "Cutout Size", "Acetate Cut", "Qty"]
         .iter()
         .zip(col_x.iter())
@@ -1157,8 +1213,24 @@ fn append_project_cover_bom_page(
         } else {
             format!("x{}", card.qty)
         };
-        page.draw_text(col_x[0] + 1.0, y, &card.title, 2.5, true, false, [0.15, 0.20, 0.28]);
-        page.draw_text(col_x[1] + 1.0, y, &card.style_name, 2.5, false, false, [0.25, 0.30, 0.36]);
+        page.draw_text(
+            col_x[0] + 1.0,
+            y,
+            &card.title,
+            2.5,
+            true,
+            false,
+            [0.15, 0.20, 0.28],
+        );
+        page.draw_text(
+            col_x[1] + 1.0,
+            y,
+            &card.style_name,
+            2.5,
+            false,
+            false,
+            [0.25, 0.30, 0.36],
+        );
         page.draw_text(
             col_x[2] + 1.0,
             y,
@@ -1168,8 +1240,24 @@ fn append_project_cover_bom_page(
             false,
             [0.25, 0.30, 0.36],
         );
-        page.draw_text(col_x[3] + 1.0, y, &ac_str, 2.5, false, false, [0.06, 0.43, 0.77]);
-        page.draw_text(col_x[4] + 1.0, y, &qty_str, 2.5, true, false, [0.15, 0.20, 0.28]);
+        page.draw_text(
+            col_x[3] + 1.0,
+            y,
+            &ac_str,
+            2.5,
+            false,
+            false,
+            [0.06, 0.43, 0.77],
+        );
+        page.draw_text(
+            col_x[4] + 1.0,
+            y,
+            &qty_str,
+            2.5,
+            true,
+            false,
+            [0.15, 0.20, 0.28],
+        );
         if !card.walls_used.is_empty() {
             y += 3.8;
             page.draw_text(
@@ -1297,7 +1385,8 @@ pub fn estimate_pdf_pages(
         }
     };
     if opts.include_cover_bom {
-        doc.pages.push(PdfPage::new(210.0, 297.0, "", "", false, false, false));
+        doc.pages
+            .push(PdfPage::new(210.0, 297.0, "", "", false, false, false));
     }
     if opts.include_wall_tiles && project.manifest.kind == ProjectKind::MultiWall {
         for wall in &project.walls {

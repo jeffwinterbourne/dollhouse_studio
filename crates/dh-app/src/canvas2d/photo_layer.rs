@@ -2,8 +2,8 @@ use crate::photo_cache::WallPhotoTextureCache;
 use crate::theme::StudioPalette;
 use dh_core::{DisplayUnit, WallPhotoConfig};
 use eframe::egui::{
-    self, Align2, Color32, CornerRadius, FontId, Pos2, Rect, RichText, Shape, Stroke,
-    StrokeKind, Vec2,
+    self, Align2, Color32, CornerRadius, FontId, Pos2, Rect, RichText, Shape, Stroke, StrokeKind,
+    Vec2,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -118,7 +118,6 @@ pub struct PhotoLayerOutput {
     pub exit_photo_mode: bool,
 }
 
-
 /// Renders the calibrated underlay image beneath the blueprint wall grid and handles.
 pub fn paint_photo_underlay(
     painter: &egui::Painter,
@@ -137,16 +136,18 @@ pub fn paint_photo_underlay(
 
     // When directly picking 4 perspective pins on-canvas, show the raw image texture underneath
     // so corners do not shift beneath the pointer while adjusting pins.
-    if active && tool == PhotoCanvasTool::PerspectivePins
-        && let Some((raw_tex, _, _)) = cache.raw_texture() {
-            painter.image(
-                raw_tex.id(),
-                rect,
-                Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
-                tint,
-            );
-            return;
-        }
+    if active
+        && tool == PhotoCanvasTool::PerspectivePins
+        && let Some((raw_tex, _, _)) = cache.raw_texture()
+    {
+        painter.image(
+            raw_tex.id(),
+            rect,
+            Rect::from_min_max(Pos2::ZERO, Pos2::new(1.0, 1.0)),
+            tint,
+        );
+        return;
+    }
 
     if let Some((_, proc_tex)) = cache.loaded_egui_texture() {
         painter.image(
@@ -305,7 +306,10 @@ fn draw_photo_hud_bar(
     state: &mut PhotoLayerState,
     out: &mut PhotoLayerOutput,
 ) {
-    let hud_pos = Pos2::new(xform.canvas_rect.center().x - 280.0, xform.canvas_rect.top() + 34.0);
+    let hud_pos = Pos2::new(
+        xform.canvas_rect.center().x - 280.0,
+        xform.canvas_rect.top() + 34.0,
+    );
     let hud_id = ui.scope_id().with("photo_canvas_hud");
     egui::Area::new(hud_id)
         .fixed_pos(hud_pos)
@@ -491,107 +495,109 @@ fn interact_move_stretch(
         photo_rect.left_center(),
     ];
 
-    if primary_pressed
-        && let Some(pos) = pointer_pos {
-            if let Some((idx, _)) = handle_pts
-                .iter()
-                .enumerate()
-                .find(|(_, pt)| pt.distance(pos) <= 10.0)
-            {
-                state.active_handle = Some(ActivePhotoHandle::ResizeEdge(idx));
-                state.drag_start_photo = Some(cfg.clone());
-                state.drag_start_mm = xform.screen_to_mm(pos);
-                out.consumed_pointer = true;
-            } else if photo_rect.contains(pos) {
-                state.active_handle = Some(ActivePhotoHandle::MovePhoto);
-                state.drag_start_photo = Some(cfg.clone());
-                state.drag_start_mm = xform.screen_to_mm(pos);
-                out.consumed_pointer = true;
-            }
+    if primary_pressed && let Some(pos) = pointer_pos {
+        if let Some((idx, _)) = handle_pts
+            .iter()
+            .enumerate()
+            .find(|(_, pt)| pt.distance(pos) <= 10.0)
+        {
+            state.active_handle = Some(ActivePhotoHandle::ResizeEdge(idx));
+            state.drag_start_photo = Some(cfg.clone());
+            state.drag_start_mm = xform.screen_to_mm(pos);
+            out.consumed_pointer = true;
+        } else if photo_rect.contains(pos) {
+            state.active_handle = Some(ActivePhotoHandle::MovePhoto);
+            state.drag_start_photo = Some(cfg.clone());
+            state.drag_start_mm = xform.screen_to_mm(pos);
+            out.consumed_pointer = true;
         }
+    }
 
     if primary_down
-        && let (Some(pos), Some(handle), Some(start)) =
-            (pointer_pos, state.active_handle, state.drag_start_photo.as_ref())
-        {
-            let cur_mm = xform.screen_to_mm(pos);
-            let dx = cur_mm[0] - state.drag_start_mm[0];
-            let dy = cur_mm[1] - state.drag_start_mm[1];
-            match handle {
-                ActivePhotoHandle::MovePhoto => {
-                    let mut nx = start.offset_x_mm + dx;
-                    let mut ny = start.offset_y_mm + dy;
-                    if !shift_held {
-                        let snap = 4.0;
-                        if nx.abs() < snap {
-                            nx = 0.0;
-                        } else if ((nx + start.width_mm) - wall_w).abs() < snap {
-                            nx = wall_w - start.width_mm;
-                        }
-                        if ny.abs() < snap {
-                            ny = 0.0;
-                        } else if ((ny + start.height_mm) - wall_h).abs() < snap {
-                            ny = wall_h - start.height_mm;
-                        }
+        && let (Some(pos), Some(handle), Some(start)) = (
+            pointer_pos,
+            state.active_handle,
+            state.drag_start_photo.as_ref(),
+        )
+    {
+        let cur_mm = xform.screen_to_mm(pos);
+        let dx = cur_mm[0] - state.drag_start_mm[0];
+        let dy = cur_mm[1] - state.drag_start_mm[1];
+        match handle {
+            ActivePhotoHandle::MovePhoto => {
+                let mut nx = start.offset_x_mm + dx;
+                let mut ny = start.offset_y_mm + dy;
+                if !shift_held {
+                    let snap = 4.0;
+                    if nx.abs() < snap {
+                        nx = 0.0;
+                    } else if ((nx + start.width_mm) - wall_w).abs() < snap {
+                        nx = wall_w - start.width_mm;
                     }
-                    cfg.offset_x_mm = nx;
-                    cfg.offset_y_mm = ny;
-                    out.changed = true;
-                    out.consumed_pointer = true;
+                    if ny.abs() < snap {
+                        ny = 0.0;
+                    } else if ((ny + start.height_mm) - wall_h).abs() < snap {
+                        ny = wall_h - start.height_mm;
+                    }
                 }
-                ActivePhotoHandle::ResizeEdge(idx) => {
-                    let mut left = start.offset_x_mm;
-                    let mut bottom = start.offset_y_mm;
-                    let mut right = start.offset_x_mm + start.width_mm;
-                    let mut top = start.offset_y_mm + start.height_mm;
-                    let aspect = (start.width_mm / start.height_mm.max(1.0)).max(0.05);
-                    let is_corner = matches!(idx, 0 | 2 | 4 | 6);
-                    let keep_aspect = is_corner && cfg.lock_aspect && !alt_held;
+                cfg.offset_x_mm = nx;
+                cfg.offset_y_mm = ny;
+                out.changed = true;
+                out.consumed_pointer = true;
+            }
+            ActivePhotoHandle::ResizeEdge(idx) => {
+                let mut left = start.offset_x_mm;
+                let mut bottom = start.offset_y_mm;
+                let mut right = start.offset_x_mm + start.width_mm;
+                let mut top = start.offset_y_mm + start.height_mm;
+                let aspect = (start.width_mm / start.height_mm.max(1.0)).max(0.05);
+                let is_corner = matches!(idx, 0 | 2 | 4 | 6);
+                let keep_aspect = is_corner && cfg.lock_aspect && !alt_held;
 
+                match idx {
+                    0 => {
+                        left = (left + dx).min(right - 10.0);
+                        top = (top + dy).max(bottom + 10.0);
+                    }
+                    1 => top = (top + dy).max(bottom + 10.0),
+                    2 => {
+                        right = (right + dx).max(left + 10.0);
+                        top = (top + dy).max(bottom + 10.0);
+                    }
+                    3 => right = (right + dx).max(left + 10.0),
+                    4 => {
+                        right = (right + dx).max(left + 10.0);
+                        bottom = (bottom + dy).min(top - 10.0);
+                    }
+                    5 => bottom = (bottom + dy).min(top - 10.0),
+                    6 => {
+                        left = (left + dx).min(right - 10.0);
+                        bottom = (bottom + dy).min(top - 10.0);
+                    }
+                    7 => left = (left + dx).min(right - 10.0),
+                    _ => {}
+                }
+
+                if keep_aspect {
+                    let w = (right - left).max(10.0);
+                    let h_from_w = (w / aspect).max(10.0);
                     match idx {
-                        0 => {
-                            left = (left + dx).min(right - 10.0);
-                            top = (top + dy).max(bottom + 10.0);
-                        }
-                        1 => top = (top + dy).max(bottom + 10.0),
-                        2 => {
-                            right = (right + dx).max(left + 10.0);
-                            top = (top + dy).max(bottom + 10.0);
-                        }
-                        3 => right = (right + dx).max(left + 10.0),
-                        4 => {
-                            right = (right + dx).max(left + 10.0);
-                            bottom = (bottom + dy).min(top - 10.0);
-                        }
-                        5 => bottom = (bottom + dy).min(top - 10.0),
-                        6 => {
-                            left = (left + dx).min(right - 10.0);
-                            bottom = (bottom + dy).min(top - 10.0);
-                        }
-                        7 => left = (left + dx).min(right - 10.0),
+                        0 | 2 => top = bottom + h_from_w,
+                        4 | 6 => bottom = top - h_from_w,
                         _ => {}
                     }
-
-                    if keep_aspect {
-                        let w = (right - left).max(10.0);
-                        let h_from_w = (w / aspect).max(10.0);
-                        match idx {
-                            0 | 2 => top = bottom + h_from_w,
-                            4 | 6 => bottom = top - h_from_w,
-                            _ => {}
-                        }
-                    }
-
-                    cfg.offset_x_mm = left;
-                    cfg.offset_y_mm = bottom;
-                    cfg.width_mm = (right - left).max(10.0);
-                    cfg.height_mm = (top - bottom).max(10.0);
-                    out.changed = true;
-                    out.consumed_pointer = true;
                 }
-                _ => {}
+
+                cfg.offset_x_mm = left;
+                cfg.offset_y_mm = bottom;
+                cfg.width_mm = (right - left).max(10.0);
+                cfg.height_mm = (top - bottom).max(10.0);
+                out.changed = true;
+                out.consumed_pointer = true;
             }
+            _ => {}
         }
+    }
 
     // Paint the 8 handles cleanly.
     for (idx, pt) in handle_pts.iter().enumerate() {
@@ -657,20 +663,22 @@ fn interact_rotate(
         out.consumed_pointer = true;
     }
 
-    if primary_down && state.active_handle == Some(ActivePhotoHandle::RotateKnob)
-        && let Some(pos) = pointer_pos {
-            let v = pos - center;
-            let mut deg = (v.y.atan2(v.x).to_degrees() + 90.0) as f64;
-            if shift_held {
-                deg = (deg / 5.0).round() * 5.0;
-            }
-            if deg > 180.0 {
-                deg -= 360.0;
-            }
-            cfg.rotation_deg = deg;
-            out.changed = true;
-            out.consumed_pointer = true;
+    if primary_down
+        && state.active_handle == Some(ActivePhotoHandle::RotateKnob)
+        && let Some(pos) = pointer_pos
+    {
+        let v = pos - center;
+        let mut deg = (v.y.atan2(v.x).to_degrees() + 90.0) as f64;
+        if shift_held {
+            deg = (deg / 5.0).round() * 5.0;
         }
+        if deg > 180.0 {
+            deg -= 360.0;
+        }
+        cfg.rotation_deg = deg;
+        out.changed = true;
+        out.consumed_pointer = true;
+    }
 
     painter.circle_filled(knob, 7.0, if hovered { pal.gold } else { Color32::WHITE });
     painter.circle_stroke(knob, 7.0, Stroke::new(2.0, pal.accent));
@@ -724,27 +732,31 @@ fn interact_perspective_pins(
 
     if primary_pressed
         && let Some(pos) = pointer_pos
-            && let Some((idx, _)) = pts.iter().enumerate().find(|(_, pt)| pt.distance(pos) <= 13.0) {
-                state.active_handle = Some(ActivePhotoHandle::PerspCorner(idx));
-                state.drag_start_photo = Some(cfg.clone());
-                state.fast_preview = true;
-                out.consumed_pointer = true;
-            }
+        && let Some((idx, _)) = pts
+            .iter()
+            .enumerate()
+            .find(|(_, pt)| pt.distance(pos) <= 13.0)
+    {
+        state.active_handle = Some(ActivePhotoHandle::PerspCorner(idx));
+        state.drag_start_photo = Some(cfg.clone());
+        state.fast_preview = true;
+        out.consumed_pointer = true;
+    }
 
     let mut active_uv: Option<[f64; 2]> = None;
     let mut active_pos: Option<Pos2> = None;
     if primary_down
         && let (Some(pos), Some(ActivePhotoHandle::PerspCorner(idx))) =
             (pointer_pos, state.active_handle)
-        {
-            let uv = screen_to_uv(pos);
-            quad[idx] = uv;
-            cfg.perspective_quad = Some(quad);
-            active_uv = Some(uv);
-            active_pos = Some(pos);
-            out.changed = true;
-            out.consumed_pointer = true;
-        }
+    {
+        let uv = screen_to_uv(pos);
+        quad[idx] = uv;
+        cfg.perspective_quad = Some(quad);
+        active_uv = Some(uv);
+        active_pos = Some(pos);
+        out.changed = true;
+        out.consumed_pointer = true;
+    }
 
     let labels = ["TL", "TR", "BR", "BL"];
     for (idx, pt) in pts.iter().enumerate() {
@@ -798,12 +810,18 @@ fn interact_crop(
     // Dimmed masks outside crop_rect.
     let mask = Color32::from_rgba_unmultiplied(10, 14, 20, 145);
     painter.rect_filled(
-        Rect::from_min_max(photo_rect.left_top(), Pos2::new(photo_rect.right(), crop_rect.top())),
+        Rect::from_min_max(
+            photo_rect.left_top(),
+            Pos2::new(photo_rect.right(), crop_rect.top()),
+        ),
         0.0,
         mask,
     );
     painter.rect_filled(
-        Rect::from_min_max(Pos2::new(photo_rect.left(), crop_rect.bottom()), photo_rect.right_bottom()),
+        Rect::from_min_max(
+            Pos2::new(photo_rect.left(), crop_rect.bottom()),
+            photo_rect.right_bottom(),
+        ),
         0.0,
         mask,
     );
@@ -840,49 +858,46 @@ fn interact_crop(
 
     if primary_pressed
         && let Some(pos) = pointer_pos
-            && let Some((idx, _)) = side_handles
-                .iter()
-                .enumerate()
-                .find(|(_, pt)| pt.distance(pos) <= 12.0)
-            {
-                state.active_handle = Some(ActivePhotoHandle::CropSide(idx));
-                state.fast_preview = true;
-                out.consumed_pointer = true;
-            }
+        && let Some((idx, _)) = side_handles
+            .iter()
+            .enumerate()
+            .find(|(_, pt)| pt.distance(pos) <= 12.0)
+    {
+        state.active_handle = Some(ActivePhotoHandle::CropSide(idx));
+        state.fast_preview = true;
+        out.consumed_pointer = true;
+    }
 
     if primary_down
-        && let (Some(pos), Some(ActivePhotoHandle::CropSide(idx))) = (pointer_pos, state.active_handle)
-        {
-            match idx {
-                0 => {
-                    let frac = ((pos.x - photo_rect.left()) / photo_rect.width().max(1.0)) as f64;
-                    cfg.crop_left = frac.clamp(0.0, 0.45);
-                }
-                1 => {
-                    let frac = ((pos.y - photo_rect.top()) / photo_rect.height().max(1.0)) as f64;
-                    cfg.crop_top = frac.clamp(0.0, 0.45);
-                }
-                2 => {
-                    let frac = ((photo_rect.right() - pos.x) / photo_rect.width().max(1.0)) as f64;
-                    cfg.crop_right = frac.clamp(0.0, 0.45);
-                }
-                3 => {
-                    let frac = ((photo_rect.bottom() - pos.y) / photo_rect.height().max(1.0)) as f64;
-                    cfg.crop_bottom = frac.clamp(0.0, 0.45);
-                }
-                _ => {}
+        && let (Some(pos), Some(ActivePhotoHandle::CropSide(idx))) =
+            (pointer_pos, state.active_handle)
+    {
+        match idx {
+            0 => {
+                let frac = ((pos.x - photo_rect.left()) / photo_rect.width().max(1.0)) as f64;
+                cfg.crop_left = frac.clamp(0.0, 0.45);
             }
-            cfg.clamp_edits();
-            out.changed = true;
-            out.consumed_pointer = true;
+            1 => {
+                let frac = ((pos.y - photo_rect.top()) / photo_rect.height().max(1.0)) as f64;
+                cfg.crop_top = frac.clamp(0.0, 0.45);
+            }
+            2 => {
+                let frac = ((photo_rect.right() - pos.x) / photo_rect.width().max(1.0)) as f64;
+                cfg.crop_right = frac.clamp(0.0, 0.45);
+            }
+            3 => {
+                let frac = ((photo_rect.bottom() - pos.y) / photo_rect.height().max(1.0)) as f64;
+                cfg.crop_bottom = frac.clamp(0.0, 0.45);
+            }
+            _ => {}
         }
+        cfg.clamp_edits();
+        out.changed = true;
+        out.consumed_pointer = true;
+    }
 
     for pt in side_handles {
-        painter.rect_filled(
-            Rect::from_center_size(pt, Vec2::splat(9.0)),
-            2.0,
-            pal.gold,
-        );
+        painter.rect_filled(Rect::from_center_size(pt, Vec2::splat(9.0)), 2.0, pal.gold);
     }
 }
 
@@ -903,52 +918,51 @@ fn interact_caliper(
     // Allow dragging existing A/B endpoints or placing A -> B cleanly.
     if primary_pressed
         && let Some(pos) = pointer_pos
-            && xform.canvas_rect.contains(pos) {
-                let s0 = state.caliper_pts_mm[0].map(|p| xform.mm_to_screen(p));
-                let s1 = state.caliper_pts_mm[1].map(|p| xform.mm_to_screen(p));
-                if s0.is_some_and(|p| p.distance(pos) <= 12.0) {
-                    state.active_handle = Some(ActivePhotoHandle::CaliperEndpoint(0));
-                    out.consumed_pointer = true;
-                } else if s1.is_some_and(|p| p.distance(pos) <= 12.0) {
-                    state.active_handle = Some(ActivePhotoHandle::CaliperEndpoint(1));
-                    out.consumed_pointer = true;
-                } else if state.caliper_pts_mm[0].is_none() || state.caliper_pts_mm[1].is_some() {
-                    let mm = xform.screen_to_mm(pos);
-                    state.caliper_pts_mm[0] = Some(mm);
-                    state.caliper_pts_mm[1] = Some(mm);
-                    state.active_handle = Some(ActivePhotoHandle::DraggingNewCaliperB);
-                    out.consumed_pointer = true;
-                } else {
-                    state.caliper_pts_mm[1] = Some(xform.screen_to_mm(pos));
-                    out.consumed_pointer = true;
-                }
-            }
-
-    if primary_down
-        && let (Some(pos), Some(h)) = (pointer_pos, state.active_handle) {
+        && xform.canvas_rect.contains(pos)
+    {
+        let s0 = state.caliper_pts_mm[0].map(|p| xform.mm_to_screen(p));
+        let s1 = state.caliper_pts_mm[1].map(|p| xform.mm_to_screen(p));
+        if s0.is_some_and(|p| p.distance(pos) <= 12.0) {
+            state.active_handle = Some(ActivePhotoHandle::CaliperEndpoint(0));
+            out.consumed_pointer = true;
+        } else if s1.is_some_and(|p| p.distance(pos) <= 12.0) {
+            state.active_handle = Some(ActivePhotoHandle::CaliperEndpoint(1));
+            out.consumed_pointer = true;
+        } else if state.caliper_pts_mm[0].is_none() || state.caliper_pts_mm[1].is_some() {
             let mm = xform.screen_to_mm(pos);
-            let show_loupe = match h {
-                ActivePhotoHandle::CaliperEndpoint(0) => {
-                    state.caliper_pts_mm[0] = Some(mm);
-                    out.consumed_pointer = true;
-                    true
-                }
-                ActivePhotoHandle::CaliperEndpoint(1)
-                | ActivePhotoHandle::DraggingNewCaliperB => {
-                    state.caliper_pts_mm[1] = Some(mm);
-                    out.consumed_pointer = true;
-                    true
-                }
-                _ => false,
-            };
-            if show_loupe && photo_rect.width() > 4.0 && photo_rect.height() > 4.0 {
-                let uv = [
-                    ((pos.x - photo_rect.left()) / photo_rect.width()).clamp(0.0, 1.0) as f64,
-                    ((pos.y - photo_rect.top()) / photo_rect.height()).clamp(0.0, 1.0) as f64,
-                ];
-                draw_cursor_loupe(painter, pal, cache, pos, uv);
-            }
+            state.caliper_pts_mm[0] = Some(mm);
+            state.caliper_pts_mm[1] = Some(mm);
+            state.active_handle = Some(ActivePhotoHandle::DraggingNewCaliperB);
+            out.consumed_pointer = true;
+        } else {
+            state.caliper_pts_mm[1] = Some(xform.screen_to_mm(pos));
+            out.consumed_pointer = true;
         }
+    }
+
+    if primary_down && let (Some(pos), Some(h)) = (pointer_pos, state.active_handle) {
+        let mm = xform.screen_to_mm(pos);
+        let show_loupe = match h {
+            ActivePhotoHandle::CaliperEndpoint(0) => {
+                state.caliper_pts_mm[0] = Some(mm);
+                out.consumed_pointer = true;
+                true
+            }
+            ActivePhotoHandle::CaliperEndpoint(1) | ActivePhotoHandle::DraggingNewCaliperB => {
+                state.caliper_pts_mm[1] = Some(mm);
+                out.consumed_pointer = true;
+                true
+            }
+            _ => false,
+        };
+        if show_loupe && photo_rect.width() > 4.0 && photo_rect.height() > 4.0 {
+            let uv = [
+                ((pos.x - photo_rect.left()) / photo_rect.width()).clamp(0.0, 1.0) as f64,
+                ((pos.y - photo_rect.top()) / photo_rect.height()).clamp(0.0, 1.0) as f64,
+            ];
+            draw_cursor_loupe(painter, pal, cache, pos, uv);
+        }
+    }
 
     // Paint caliper line & endpoints.
     if let Some(p0) = state.caliper_pts_mm[0] {
@@ -1029,11 +1043,13 @@ pub fn draw_caliper_control_bar(
                         ui.label(RichText::new("Known Target:").strong().size(12.2));
                         for (label, mm) in unit.calibration_presets() {
                             let active = (state.caliper_target_mm - mm).abs() < 0.25;
-                            let btn = egui::Button::new(
-                                RichText::new(label)
-                                    .size(11.8)
-                                    .color(if active { pal.accent_text } else { pal.text_primary }),
-                            )
+                            let btn = egui::Button::new(RichText::new(label).size(11.8).color(
+                                if active {
+                                    pal.accent_text
+                                } else {
+                                    pal.text_primary
+                                },
+                            ))
                             .fill(if active { pal.accent } else { pal.surface_card })
                             .stroke(Stroke::new(1.0, pal.border))
                             .corner_radius(CornerRadius::same(5));
@@ -1075,11 +1091,17 @@ pub fn draw_caliper_control_bar(
 
                         let ready = measured_mm > 2.0;
                         let apply_btn = egui::Button::new(
-                            RichText::new("Apply Scale")
-                                .strong()
-                                .color(if ready { pal.accent_text } else { pal.text_muted }),
+                            RichText::new("Apply Scale").strong().color(if ready {
+                                pal.accent_text
+                            } else {
+                                pal.text_muted
+                            }),
                         )
-                        .fill(if ready { pal.accent } else { pal.surface_card });
+                        .fill(if ready {
+                            pal.accent
+                        } else {
+                            pal.surface_card
+                        });
                         if ui.add_enabled(ready, apply_btn).clicked() {
                             let anchor = if state.anchor_origin_on_apply {
                                 [0.0, 0.0]
@@ -1134,11 +1156,17 @@ fn draw_cursor_loupe(
     let cy = loupe_rect.center().y;
     let ch = Stroke::new(1.3, pal.gold);
     painter.line_segment(
-        [Pos2::new(loupe_rect.left() + 8.0, cy), Pos2::new(loupe_rect.right() - 8.0, cy)],
+        [
+            Pos2::new(loupe_rect.left() + 8.0, cy),
+            Pos2::new(loupe_rect.right() - 8.0, cy),
+        ],
         ch,
     );
     painter.line_segment(
-        [Pos2::new(cx, loupe_rect.top() + 8.0), Pos2::new(cx, loupe_rect.bottom() - 8.0)],
+        [
+            Pos2::new(cx, loupe_rect.top() + 8.0),
+            Pos2::new(cx, loupe_rect.bottom() - 8.0),
+        ],
         ch,
     );
 }

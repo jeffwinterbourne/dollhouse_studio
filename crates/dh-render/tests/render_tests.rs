@@ -39,7 +39,8 @@ fn ray_picking_and_wall_plane_intersection_match_opening_coordinates() {
     let hit = pick_wall_opening(&built, &cam, rect, screen_pt);
     assert_eq!(hit.as_deref(), Some(door_id.as_str()));
 
-    let wall_pt = ray_wall_plane_point(built.wall.width, built.wall.height, &cam, rect, screen_pt).unwrap();
+    let wall_pt =
+        ray_wall_plane_point(built.wall.width, built.wall.height, &cam, rect, screen_pt).unwrap();
     let expected_wx = *cx as f64 + built.wall.width * 0.5;
     let expected_wy = *cy as f64 + built.wall.height * 0.5;
     assert!((wall_pt[0] - expected_wx).abs() < 1.0);

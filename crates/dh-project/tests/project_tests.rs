@@ -42,7 +42,10 @@ fn single_piece_and_multi_wall_folder_projects_roundtrip_and_prune() {
 
     let loaded_single = ProjectStore::open_dir(&single_dir).unwrap();
     assert!(!loaded_single.has_crash_recovery);
-    assert_eq!(loaded_single.project.manifest.kind, ProjectKind::SinglePiece);
+    assert_eq!(
+        loaded_single.project.manifest.kind,
+        ProjectKind::SinglePiece
+    );
     assert_eq!(loaded_single.project.pieces.len(), 1);
     assert_eq!(
         loaded_single.project.manifest.display_unit,
@@ -91,8 +94,12 @@ fn single_piece_and_multi_wall_folder_projects_roundtrip_and_prune() {
 #[test]
 fn crash_recovery_autosave_detects_loads_and_clears_on_save() {
     let dir = temp_test_dir("autosave");
-    let mut proj =
-        Project::new_multi_wall("Recovery House", true, ScalePreset::Scale1_12, DisplayUnit::Mm);
+    let mut proj = Project::new_multi_wall(
+        "Recovery House",
+        true,
+        ScalePreset::Scale1_12,
+        DisplayUnit::Mm,
+    );
     ProjectStore::create_in_dir(&dir, &mut proj).unwrap();
 
     // Simulate unsaved edit flushed to autosave

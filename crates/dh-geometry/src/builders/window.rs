@@ -296,7 +296,10 @@ pub(crate) fn build_wall_cutaway_mesh(
             boss_shapes = union_shapes(&boss_shapes, &rj);
         }
 
-        let clipped_boss = difference_shapes(&intersection_shapes(&boss_shapes, &wall_outer), &wall_cutout);
+        let clipped_boss = difference_shapes(
+            &intersection_shapes(&boss_shapes, &wall_outer),
+            &wall_cutout,
+        );
         if !clipped_boss.is_empty() {
             let boss_mesh = extrude_slabs(&[Slab {
                 z0: -boss_depth,
@@ -449,7 +452,13 @@ fn build_architrave_grooves(
     offsets
         .into_iter()
         .map(|off| VGroove {
-            centerline: profile_contour(kind, w, h, off + params.wall_fit_clearance * 0.5, ARC_SEGMENTS),
+            centerline: profile_contour(
+                kind,
+                w,
+                h,
+                off + params.wall_fit_clearance * 0.5,
+                ARC_SEGMENTS,
+            ),
             width: gw,
             depth: gd,
         })
@@ -473,7 +482,8 @@ pub(crate) fn build_exterior_addons(
     let fit_clr = params.wall_fit_clearance;
     let x_trim = w * 0.5 + trim_w + fit_clr;
     let y_trim_top = h * 0.5 + trim_w + fit_clr;
-    let sill_active = params.sill_enabled && params.style.supports_sill() && !params.flush_bottom_sill;
+    let sill_active =
+        params.sill_enabled && params.style.supports_sill() && !params.flush_bottom_sill;
     let clip_bounds = if params.has_any_flush_edge() {
         flush_clip_bounds(kind, w, h, params)
     } else {
@@ -487,101 +497,115 @@ pub(crate) fn build_exterior_addons(
         && let (Some(y_sh_top_raw), Some((_, _, cy0, cy1))) =
             (arch_spring_top_y(kind, w, h), clip_bounds)
     {
-            let y_sh_bot_base = if sill_active {
-                -params.opening_height * 0.5
-            } else {
-                -h * 0.5
-            };
-            let y_sh_bot = y_sh_bot_base.max(cy0);
-            let y_sh_top = (y_sh_top_raw - step_inset * 0.25).min(cy1);
-            let sh_w = (params.opening_width * params.shutter_width_ratio - step_inset * 0.45)
-                .clamp(6.0, 45.0);
-            if y_sh_top > y_sh_bot + 10.0 && sh_w >= 6.0 {
-                // Overlap 0.45mm inward into the architrave so union stays single-component
-                let mut side_centers = Vec::new();
-                if !params.flush_left_jamb {
-                    contours.push(rect_bounds(-x_trim - sh_w, y_sh_bot, -x_trim + 0.45, y_sh_top));
-                    side_centers.push(-x_trim - sh_w * 0.5);
-                }
-                if !params.flush_right_jamb {
-                    contours.push(rect_bounds(x_trim - 0.45, y_sh_bot, x_trim + sh_w, y_sh_top));
-                    side_centers.push(x_trim + sh_w * 0.5);
-                }
+        let y_sh_bot_base = if sill_active {
+            -params.opening_height * 0.5
+        } else {
+            -h * 0.5
+        };
+        let y_sh_bot = y_sh_bot_base.max(cy0);
+        let y_sh_top = (y_sh_top_raw - step_inset * 0.25).min(cy1);
+        let sh_w = (params.opening_width * params.shutter_width_ratio - step_inset * 0.45)
+            .clamp(6.0, 45.0);
+        if y_sh_top > y_sh_bot + 10.0 && sh_w >= 6.0 {
+            // Overlap 0.45mm inward into the architrave so union stays single-component
+            let mut side_centers = Vec::new();
+            if !params.flush_left_jamb {
+                contours.push(rect_bounds(
+                    -x_trim - sh_w,
+                    y_sh_bot,
+                    -x_trim + 0.45,
+                    y_sh_top,
+                ));
+                side_centers.push(-x_trim - sh_w * 0.5);
+            }
+            if !params.flush_right_jamb {
+                contours.push(rect_bounds(
+                    x_trim - 0.45,
+                    y_sh_bot,
+                    x_trim + sh_w,
+                    y_sh_top,
+                ));
+                side_centers.push(x_trim + sh_w * 0.5);
+            }
 
-                if let Some(grooves) = ext_grooves {
-                    let gw = params.groove_width.clamp(0.45, 1.0);
-                    let gd = gw * 0.58;
-                    let mx = (chamfer_inset + gw * 0.75 + 1.0).max(2.0);
-                    let my = (chamfer_inset + gw * 0.75 + 1.2).max(2.4);
-                    let inner_pw = sh_w - 2.0 * mx;
-                    let inner_ph = (y_sh_top - y_sh_bot) - 2.0 * my;
+            if let Some(grooves) = ext_grooves {
+                let gw = params.groove_width.clamp(0.45, 1.0);
+                let gd = gw * 0.58;
+                let mx = (chamfer_inset + gw * 0.75 + 1.0).max(2.0);
+                let my = (chamfer_inset + gw * 0.75 + 1.2).max(2.4);
+                let inner_pw = sh_w - 2.0 * mx;
+                let inner_ph = (y_sh_top - y_sh_bot) - 2.0 * my;
 
-                    if inner_pw >= gw + 1.2 && inner_ph >= gw + 1.6 {
-                        for side_cx in side_centers {
-                            let cy_mid = (y_sh_bot + y_sh_top) * 0.5;
-                            match params.shutter_style {
-                                ShutterStyle::None => {}
-                                ShutterStyle::Panelled => {
-                                    let gap = (gw + 1.4).max(2.2);
-                                    if inner_ph >= (gw + 1.2) * 2.0 + gap {
-                                        let ph = (inner_ph - gap) * 0.5;
-                                        let upper_cy = cy_mid + gap * 0.5 + ph * 0.5;
-                                        let lower_cy = cy_mid - gap * 0.5 - ph * 0.5;
-                                        grooves.push(VGroove {
-                                            centerline: rect_centered(side_cx, upper_cy, inner_pw, ph),
-                                            width: gw,
-                                            depth: gd,
-                                        });
-                                        grooves.push(VGroove {
-                                            centerline: rect_centered(side_cx, lower_cy, inner_pw, ph),
-                                            width: gw,
-                                            depth: gd,
-                                        });
-                                    } else {
-                                        grooves.push(VGroove {
-                                            centerline: rect_centered(side_cx, cy_mid, inner_pw, inner_ph),
-                                            width: gw,
-                                            depth: gd,
-                                        });
-                                    }
+                if inner_pw >= gw + 1.2 && inner_ph >= gw + 1.6 {
+                    for side_cx in side_centers {
+                        let cy_mid = (y_sh_bot + y_sh_top) * 0.5;
+                        match params.shutter_style {
+                            ShutterStyle::None => {}
+                            ShutterStyle::Panelled => {
+                                let gap = (gw + 1.4).max(2.2);
+                                if inner_ph >= (gw + 1.2) * 2.0 + gap {
+                                    let ph = (inner_ph - gap) * 0.5;
+                                    let upper_cy = cy_mid + gap * 0.5 + ph * 0.5;
+                                    let lower_cy = cy_mid - gap * 0.5 - ph * 0.5;
+                                    grooves.push(VGroove {
+                                        centerline: rect_centered(side_cx, upper_cy, inner_pw, ph),
+                                        width: gw,
+                                        depth: gd,
+                                    });
+                                    grooves.push(VGroove {
+                                        centerline: rect_centered(side_cx, lower_cy, inner_pw, ph),
+                                        width: gw,
+                                        depth: gd,
+                                    });
+                                } else {
+                                    grooves.push(VGroove {
+                                        centerline: rect_centered(
+                                            side_cx, cy_mid, inner_pw, inner_ph,
+                                        ),
+                                        width: gw,
+                                        depth: gd,
+                                    });
                                 }
-                                ShutterStyle::Louvred => {
-                                    let min_slot_h = gw + 1.1;
-                                    let min_gap = gw + 0.9;
-                                    let max_n = ((inner_ph + min_gap) / (min_slot_h + min_gap))
-                                        .floor() as usize;
-                                    let n = max_n.clamp(1, 6);
-                                    if n >= 2 {
-                                        let total_gaps = (n - 1) as f64 * min_gap;
-                                        let slot_h = (inner_ph - total_gaps) / n as f64;
-                                        if slot_h >= min_slot_h {
-                                            let y_start = y_sh_bot + my;
-                                            for k in 0..n {
-                                                let sy = y_start
-                                                    + k as f64 * (slot_h + min_gap)
-                                                    + slot_h * 0.5;
-                                                grooves.push(VGroove {
-                                                    centerline: rect_centered(
-                                                        side_cx, sy, inner_pw, slot_h,
-                                                    ),
-                                                    width: gw,
-                                                    depth: gd,
-                                                });
-                                            }
+                            }
+                            ShutterStyle::Louvred => {
+                                let min_slot_h = gw + 1.1;
+                                let min_gap = gw + 0.9;
+                                let max_n = ((inner_ph + min_gap) / (min_slot_h + min_gap)).floor()
+                                    as usize;
+                                let n = max_n.clamp(1, 6);
+                                if n >= 2 {
+                                    let total_gaps = (n - 1) as f64 * min_gap;
+                                    let slot_h = (inner_ph - total_gaps) / n as f64;
+                                    if slot_h >= min_slot_h {
+                                        let y_start = y_sh_bot + my;
+                                        for k in 0..n {
+                                            let sy = y_start
+                                                + k as f64 * (slot_h + min_gap)
+                                                + slot_h * 0.5;
+                                            grooves.push(VGroove {
+                                                centerline: rect_centered(
+                                                    side_cx, sy, inner_pw, slot_h,
+                                                ),
+                                                width: gw,
+                                                depth: gd,
+                                            });
                                         }
-                                    } else {
-                                        grooves.push(VGroove {
-                                            centerline: rect_centered(side_cx, cy_mid, inner_pw, inner_ph),
-                                            width: gw,
-                                            depth: gd,
-                                        });
                                     }
+                                } else {
+                                    grooves.push(VGroove {
+                                        centerline: rect_centered(
+                                            side_cx, cy_mid, inner_pw, inner_ph,
+                                        ),
+                                        width: gw,
+                                        depth: gd,
+                                    });
                                 }
                             }
                         }
                     }
                 }
             }
+        }
     }
 
     // 2. Classical Headers / Pediments (rectangular frames, suppressed when top is flush)
@@ -625,7 +649,12 @@ pub(crate) fn build_exterior_addons(
         let y_sill_bot = -params.opening_height * 0.5 - trim_w - params.sill_depth;
         let fb_w = (params.opening_width + 2.0 * (trim_w * 0.55) - step_inset * 0.8).max(10.0);
         let fb_h = ((params.opening_height * 0.14).clamp(6.0, 16.0) - step_inset * 0.4).max(4.0);
-        contours.push(rect_bounds(-fb_w * 0.5, y_sill_bot - fb_h, fb_w * 0.5, y_sill_bot + 0.5));
+        contours.push(rect_bounds(
+            -fb_w * 0.5,
+            y_sill_bot - fb_h,
+            fb_w * 0.5,
+            y_sill_bot + 0.5,
+        ));
     }
 
     union_contours(&contours)
@@ -642,12 +671,18 @@ pub fn build_window(raw_params: &WindowParams) -> GeneratedWindow {
     let barrel_w = specs.barrel_wall_thickness;
 
     let ext_outer_chamfer = if specs.effective_ext_chamfer >= 0.15 {
-        Some((specs.effective_ext_chamfer, specs.effective_ext_chamfer * 1.15))
+        Some((
+            specs.effective_ext_chamfer,
+            specs.effective_ext_chamfer * 1.15,
+        ))
     } else {
         None
     };
     let int_outer_chamfer = if specs.effective_int_chamfer >= 0.15 {
-        Some((specs.effective_int_chamfer, specs.effective_int_chamfer * 1.15))
+        Some((
+            specs.effective_int_chamfer,
+            specs.effective_int_chamfer * 1.15,
+        ))
     } else {
         None
     };
@@ -655,11 +690,7 @@ pub fn build_window(raw_params: &WindowParams) -> GeneratedWindow {
     let bar_c = if params.chamfer_bars {
         let max_bc = (params.bar_width * 0.30).min(0.55);
         let c = params.bar_chamfer_size.min(max_bc);
-        if c >= 0.10 {
-            Some((c, c * 1.15))
-        } else {
-            None
-        }
+        if c >= 0.10 { Some((c, c * 1.15)) } else { None }
     } else {
         None
     };
@@ -735,14 +766,20 @@ pub fn build_window(raw_params: &WindowParams) -> GeneratedWindow {
 
         let (ext_diag, ext_ok) = match door_out.exterior_frame.verify_printable_manifold() {
             Ok(d) => (
-                format!("{} tris | watertight | {} overhangs", d.triangle_count, d.overhang_triangles),
+                format!(
+                    "{} tris | watertight | {} overhangs",
+                    d.triangle_count, d.overhang_triangles
+                ),
                 d.is_watertight && d.overhang_triangles == 0,
             ),
             Err(e) => (e, false),
         };
         let (int_diag, int_ok) = match door_out.interior_frame.verify_printable_manifold() {
             Ok(d) => (
-                format!("{} tris | watertight | {} overhangs", d.triangle_count, d.overhang_triangles),
+                format!(
+                    "{} tris | watertight | {} overhangs",
+                    d.triangle_count, d.overhang_triangles
+                ),
                 d.is_watertight && d.overhang_triangles == 0,
             ),
             Err(e) => (e, false),
@@ -806,14 +843,21 @@ pub fn build_window(raw_params: &WindowParams) -> GeneratedWindow {
     let ext_frame_band = profile_band(kind, w, h, -params.frame_width, 0.0, ARC_SEGMENTS);
 
     // 1. Exterior architrave + optional bottom sill + v2 exterior add-ons (at z = 0..trim_thickness)
-    let ext_trim_band =
-        profile_band(kind, w, h, -params.frame_width, params.trim_width + params.wall_fit_clearance, ARC_SEGMENTS);
+    let ext_trim_band = profile_band(
+        kind,
+        w,
+        h,
+        -params.frame_width,
+        params.trim_width + params.wall_fit_clearance,
+        ARC_SEGMENTS,
+    );
     let ext_trim_with_sill =
         if params.sill_enabled && params.style.supports_sill() && !params.flush_bottom_sill {
             let sill_w = params.opening_width + 2.0 * (params.trim_width + params.sill_overhang);
             let y_top = -params.opening_height * 0.5;
             let y_bot = y_top - params.trim_width - params.sill_depth;
-            let sill_rect = shape_from_contour(rect_bounds(-sill_w * 0.5, y_bot, sill_w * 0.5, y_top));
+            let sill_rect =
+                shape_from_contour(rect_bounds(-sill_w * 0.5, y_bot, sill_w * 0.5, y_top));
             union_shapes(&ext_trim_band, &sill_rect)
         } else {
             ext_trim_band
@@ -841,8 +885,14 @@ pub fn build_window(raw_params: &WindowParams) -> GeneratedWindow {
     // 3. Structural frame bands (outer barrel & interior spigot)
     let ext_barrel_band = profile_band(kind, w, h, -barrel_w, 0.0, ARC_SEGMENTS);
     // Interior telescopic spigot band (fits inside `ext_barrel_band` with `index_clearance`)
-    let int_spigot_band =
-        profile_band(kind, w, h, -params.frame_width, int_spigot_outer_offset, ARC_SEGMENTS);
+    let int_spigot_band = profile_band(
+        kind,
+        w,
+        h,
+        -params.frame_width,
+        int_spigot_outer_offset,
+        ARC_SEGMENTS,
+    );
 
     // 4. Glazing bars / mullions / lattice / tracery clipped to the daylight glass opening
     let opening_mode = params.effective_opening_mode();
@@ -858,7 +908,13 @@ pub fn build_window(raw_params: &WindowParams) -> GeneratedWindow {
         // Opening windows carry glazing bars inside their hinged print-in-place sash(es), not in the fixed outer frame.
         Vec::new()
     } else {
-        let glass_region = shape_from_contour(profile_contour(kind, w, h, -params.frame_width, ARC_SEGMENTS));
+        let glass_region = shape_from_contour(profile_contour(
+            kind,
+            w,
+            h,
+            -params.frame_width,
+            ARC_SEGMENTS,
+        ));
         let bars_raw = build_style_bars(&params, &specs, &glass_region);
         // Clip bars slightly into the frame (+0.2mm overlap) so union is seamless, and clip outer to glass+0.2mm
         let bar_clip = shape_from_contour(profile_contour(
@@ -875,7 +931,10 @@ pub fn build_window(raw_params: &WindowParams) -> GeneratedWindow {
     let ext_base_with_bars = union_shapes(&ext_trim_with_addons, &bars_clipped);
     let ext_sleeve_with_bars = union_shapes(&ext_frame_band, &bars_clipped);
     let mut ext_slabs: Vec<Slab> = Vec::new();
-    if params.architrave_style.has_step() && params.trim_thickness >= 1.5 && params.trim_width >= 2.2 {
+    if params.architrave_style.has_step()
+        && params.trim_thickness >= 1.5
+        && params.trim_width >= 2.2
+    {
         let tier1_z = (params.trim_thickness * 0.58).max(specs.effective_ext_chamfer * 1.15 + 0.25);
         let step_inset = (params.trim_width * 0.36).clamp(0.5, 2.2);
         let stepped_band = profile_band(
@@ -891,7 +950,9 @@ pub fn build_window(raw_params: &WindowParams) -> GeneratedWindow {
                 let sw = params.opening_width
                     + 2.0 * ((params.trim_width - step_inset).max(0.8) + params.sill_overhang);
                 let y_top = -params.opening_height * 0.5;
-                let y_bot = y_top - (params.trim_width - step_inset).max(0.8) - (params.sill_depth - step_inset * 0.5).max(0.4);
+                let y_bot = y_top
+                    - (params.trim_width - step_inset).max(0.8)
+                    - (params.sill_depth - step_inset * 0.5).max(0.4);
                 let srect = shape_from_contour(rect_bounds(-sw * 0.5, y_bot, sw * 0.5, y_top));
                 union_shapes(&stepped_band, &srect)
             } else {
@@ -1252,216 +1313,259 @@ fn build_one_cone_hinged_sash(
     let hinge_stile = (k_thick + 0.55).max(other_stile);
 
     let mut cut_boxes: Vec<Contour2D> = Vec::new();
-    let (frame_k0, frame_k1, sock_k0, sock_k1, gx0, gx1, gy0, gy1, pivot_origin, pivot_axis, swing_dir) =
-        match hinge_edge {
-            SashHingeEdge::Left | SashHingeEdge::Right => {
-                let is_left = hinge_edge == SashHingeEdge::Left;
-                let (kx0, kx1, gx0, gx1, swing_dir) = if is_left {
-                    (sx0, sx0 + k_thick, sx0 + hinge_stile, sx1 - other_stile, 1.0f32)
-                } else {
-                    (sx1 - k_thick, sx1, sx0 + other_stile, sx1 - hinge_stile, -1.0f32)
-                };
-                let cx_notch0 = if is_left { kx0 - 0.2 } else { kx0 - clr };
-                let cx_notch1 = if is_left { kx1 + clr } else { kx1 + 0.2 };
-
-                let fy_bot0 = -open_h * 0.5 - frame_embed;
-                let fy_bot1 = -open_h * 0.5 + lug_protrude;
-                let fy_top0 = open_h * 0.5 - lug_protrude;
-                let fy_top1 = open_h * 0.5 + frame_embed;
-
-                let fk0 = build_cone_knuckle_block(
-                    kx0,
-                    kx1,
-                    fy_bot0,
-                    fy_bot1,
-                    0.0,
-                    sash_t,
-                    HingeFace::PosY,
-                    cone_r,
-                    cone_len,
-                    false,
-                    16,
-                );
-                let fk1 = build_cone_knuckle_block(
-                    kx0,
-                    kx1,
-                    fy_top0,
-                    fy_top1,
-                    0.0,
-                    sash_t,
-                    HingeFace::NegY,
-                    cone_r,
-                    cone_len,
-                    false,
-                    16,
-                );
-
-                let sb0_y0 = fy_bot1 + axis_gap;
-                let sb0_y1 = sb0_y0 + sock_block_len;
-                let st1_y1 = fy_top0 - axis_gap;
-                let st1_y0 = st1_y1 - sock_block_len;
-
-                let sk0 = build_cone_knuckle_block(
-                    kx0,
-                    kx1,
-                    sb0_y0,
-                    sb0_y1,
-                    0.0,
-                    sash_t,
-                    HingeFace::NegY,
-                    socket_r,
-                    socket_len,
-                    true,
-                    16,
-                );
-                let sk1 = build_cone_knuckle_block(
-                    kx0,
-                    kx1,
-                    st1_y0,
-                    st1_y1,
-                    0.0,
-                    sash_t,
-                    HingeFace::PosY,
-                    socket_r,
-                    socket_len,
-                    true,
-                    16,
-                );
-
-                // Corner relief notches + cavity clearances leaving `sock_embed` overlap at inner end
-                cut_boxes.push(rect_bounds(cx_notch0, sy0 - 0.2, cx_notch1, sb0_y0 + 0.01));
-                cut_boxes.push(rect_bounds(cx_notch0, st1_y1 - 0.01, cx_notch1, sy1 + 0.2));
-                cut_boxes.push(rect_bounds(
-                    cx_notch0,
-                    sb0_y0 - 0.01,
-                    cx_notch1,
-                    (sb0_y1 - sock_embed).max(sb0_y0 + 0.2),
-                ));
-                cut_boxes.push(rect_bounds(
-                    cx_notch0,
-                    (st1_y0 + sock_embed).min(st1_y1 - 0.2),
-                    cx_notch1,
-                    st1_y1 + 0.01,
-                ));
-
+    let (
+        frame_k0,
+        frame_k1,
+        sock_k0,
+        sock_k1,
+        gx0,
+        gx1,
+        gy0,
+        gy1,
+        pivot_origin,
+        pivot_axis,
+        swing_dir,
+    ) = match hinge_edge {
+        SashHingeEdge::Left | SashHingeEdge::Right => {
+            let is_left = hinge_edge == SashHingeEdge::Left;
+            let (kx0, kx1, gx0, gx1, swing_dir) = if is_left {
                 (
-                    fk0,
-                    fk1,
-                    sk0,
-                    sk1,
-                    gx0,
-                    gx1,
-                    sy0 + other_stile,
-                    sy1 - other_stile,
-                    [((kx0 + kx1) * 0.5) as f32, ((sy0 + sy1) * 0.5) as f32, (sash_t * 0.5) as f32],
-                    [0.0, 1.0, 0.0],
-                    swing_dir,
-                )
-            }
-            SashHingeEdge::Top | SashHingeEdge::Bottom => {
-                let is_top = hinge_edge == SashHingeEdge::Top;
-                let (ky0, ky1, gy0, gy1, swing_dir) = if is_top {
-                    (sy1 - k_thick, sy1, sy0 + other_stile, sy1 - hinge_stile, 1.0f32)
-                } else {
-                    (sy0, sy0 + k_thick, sy0 + hinge_stile, sy1 - other_stile, -1.0f32)
-                };
-                let cy_notch0 = if is_top { ky0 - clr } else { ky0 - 0.2 };
-                let cy_notch1 = if is_top { ky1 + 0.2 } else { ky1 + clr };
-
-                let fx_l0 = -open_w * 0.5 - frame_embed;
-                let fx_l1 = -open_w * 0.5 + lug_protrude;
-                let fx_r0 = open_w * 0.5 - lug_protrude;
-                let fx_r1 = open_w * 0.5 + frame_embed;
-
-                let fk0 = build_cone_knuckle_block(
-                    fx_l0,
-                    fx_l1,
-                    ky0,
-                    ky1,
-                    0.0,
-                    sash_t,
-                    HingeFace::PosX,
-                    cone_r,
-                    cone_len,
-                    false,
-                    16,
-                );
-                let fk1 = build_cone_knuckle_block(
-                    fx_r0,
-                    fx_r1,
-                    ky0,
-                    ky1,
-                    0.0,
-                    sash_t,
-                    HingeFace::NegX,
-                    cone_r,
-                    cone_len,
-                    false,
-                    16,
-                );
-
-                let sl0_x0 = fx_l1 + axis_gap;
-                let sl0_x1 = sl0_x0 + sock_block_len;
-                let sr1_x1 = fx_r0 - axis_gap;
-                let sr1_x0 = sr1_x1 - sock_block_len;
-
-                let sk0 = build_cone_knuckle_block(
-                    sl0_x0,
-                    sl0_x1,
-                    ky0,
-                    ky1,
-                    0.0,
-                    sash_t,
-                    HingeFace::NegX,
-                    socket_r,
-                    socket_len,
-                    true,
-                    16,
-                );
-                let sk1 = build_cone_knuckle_block(
-                    sr1_x0,
-                    sr1_x1,
-                    ky0,
-                    ky1,
-                    0.0,
-                    sash_t,
-                    HingeFace::PosX,
-                    socket_r,
-                    socket_len,
-                    true,
-                    16,
-                );
-
-                cut_boxes.push(rect_bounds(sx0 - 0.2, cy_notch0, sl0_x0 + 0.01, cy_notch1));
-                cut_boxes.push(rect_bounds(sr1_x1 - 0.01, cy_notch0, sx1 + 0.2, cy_notch1));
-                cut_boxes.push(rect_bounds(
-                    sl0_x0 - 0.01,
-                    cy_notch0,
-                    (sl0_x1 - sock_embed).max(sl0_x0 + 0.2),
-                    cy_notch1,
-                ));
-                cut_boxes.push(rect_bounds(
-                    (sr1_x0 + sock_embed).min(sr1_x1 - 0.2),
-                    cy_notch0,
-                    sr1_x1 + 0.01,
-                    cy_notch1,
-                ));
-
-                (
-                    fk0,
-                    fk1,
-                    sk0,
-                    sk1,
-                    sx0 + other_stile,
+                    sx0,
+                    sx0 + k_thick,
+                    sx0 + hinge_stile,
                     sx1 - other_stile,
-                    gy0,
-                    gy1,
-                    [((sx0 + sx1) * 0.5) as f32, ((ky0 + ky1) * 0.5) as f32, (sash_t * 0.5) as f32],
-                    [1.0, 0.0, 0.0],
-                    swing_dir,
+                    1.0f32,
                 )
-            }
-        };
+            } else {
+                (
+                    sx1 - k_thick,
+                    sx1,
+                    sx0 + other_stile,
+                    sx1 - hinge_stile,
+                    -1.0f32,
+                )
+            };
+            let cx_notch0 = if is_left { kx0 - 0.2 } else { kx0 - clr };
+            let cx_notch1 = if is_left { kx1 + clr } else { kx1 + 0.2 };
+
+            let fy_bot0 = -open_h * 0.5 - frame_embed;
+            let fy_bot1 = -open_h * 0.5 + lug_protrude;
+            let fy_top0 = open_h * 0.5 - lug_protrude;
+            let fy_top1 = open_h * 0.5 + frame_embed;
+
+            let fk0 = build_cone_knuckle_block(
+                kx0,
+                kx1,
+                fy_bot0,
+                fy_bot1,
+                0.0,
+                sash_t,
+                HingeFace::PosY,
+                cone_r,
+                cone_len,
+                false,
+                16,
+            );
+            let fk1 = build_cone_knuckle_block(
+                kx0,
+                kx1,
+                fy_top0,
+                fy_top1,
+                0.0,
+                sash_t,
+                HingeFace::NegY,
+                cone_r,
+                cone_len,
+                false,
+                16,
+            );
+
+            let sb0_y0 = fy_bot1 + axis_gap;
+            let sb0_y1 = sb0_y0 + sock_block_len;
+            let st1_y1 = fy_top0 - axis_gap;
+            let st1_y0 = st1_y1 - sock_block_len;
+
+            let sk0 = build_cone_knuckle_block(
+                kx0,
+                kx1,
+                sb0_y0,
+                sb0_y1,
+                0.0,
+                sash_t,
+                HingeFace::NegY,
+                socket_r,
+                socket_len,
+                true,
+                16,
+            );
+            let sk1 = build_cone_knuckle_block(
+                kx0,
+                kx1,
+                st1_y0,
+                st1_y1,
+                0.0,
+                sash_t,
+                HingeFace::PosY,
+                socket_r,
+                socket_len,
+                true,
+                16,
+            );
+
+            // Corner relief notches + cavity clearances leaving `sock_embed` overlap at inner end
+            cut_boxes.push(rect_bounds(cx_notch0, sy0 - 0.2, cx_notch1, sb0_y0 + 0.01));
+            cut_boxes.push(rect_bounds(cx_notch0, st1_y1 - 0.01, cx_notch1, sy1 + 0.2));
+            cut_boxes.push(rect_bounds(
+                cx_notch0,
+                sb0_y0 - 0.01,
+                cx_notch1,
+                (sb0_y1 - sock_embed).max(sb0_y0 + 0.2),
+            ));
+            cut_boxes.push(rect_bounds(
+                cx_notch0,
+                (st1_y0 + sock_embed).min(st1_y1 - 0.2),
+                cx_notch1,
+                st1_y1 + 0.01,
+            ));
+
+            (
+                fk0,
+                fk1,
+                sk0,
+                sk1,
+                gx0,
+                gx1,
+                sy0 + other_stile,
+                sy1 - other_stile,
+                [
+                    ((kx0 + kx1) * 0.5) as f32,
+                    ((sy0 + sy1) * 0.5) as f32,
+                    (sash_t * 0.5) as f32,
+                ],
+                [0.0, 1.0, 0.0],
+                swing_dir,
+            )
+        }
+        SashHingeEdge::Top | SashHingeEdge::Bottom => {
+            let is_top = hinge_edge == SashHingeEdge::Top;
+            let (ky0, ky1, gy0, gy1, swing_dir) = if is_top {
+                (
+                    sy1 - k_thick,
+                    sy1,
+                    sy0 + other_stile,
+                    sy1 - hinge_stile,
+                    1.0f32,
+                )
+            } else {
+                (
+                    sy0,
+                    sy0 + k_thick,
+                    sy0 + hinge_stile,
+                    sy1 - other_stile,
+                    -1.0f32,
+                )
+            };
+            let cy_notch0 = if is_top { ky0 - clr } else { ky0 - 0.2 };
+            let cy_notch1 = if is_top { ky1 + 0.2 } else { ky1 + clr };
+
+            let fx_l0 = -open_w * 0.5 - frame_embed;
+            let fx_l1 = -open_w * 0.5 + lug_protrude;
+            let fx_r0 = open_w * 0.5 - lug_protrude;
+            let fx_r1 = open_w * 0.5 + frame_embed;
+
+            let fk0 = build_cone_knuckle_block(
+                fx_l0,
+                fx_l1,
+                ky0,
+                ky1,
+                0.0,
+                sash_t,
+                HingeFace::PosX,
+                cone_r,
+                cone_len,
+                false,
+                16,
+            );
+            let fk1 = build_cone_knuckle_block(
+                fx_r0,
+                fx_r1,
+                ky0,
+                ky1,
+                0.0,
+                sash_t,
+                HingeFace::NegX,
+                cone_r,
+                cone_len,
+                false,
+                16,
+            );
+
+            let sl0_x0 = fx_l1 + axis_gap;
+            let sl0_x1 = sl0_x0 + sock_block_len;
+            let sr1_x1 = fx_r0 - axis_gap;
+            let sr1_x0 = sr1_x1 - sock_block_len;
+
+            let sk0 = build_cone_knuckle_block(
+                sl0_x0,
+                sl0_x1,
+                ky0,
+                ky1,
+                0.0,
+                sash_t,
+                HingeFace::NegX,
+                socket_r,
+                socket_len,
+                true,
+                16,
+            );
+            let sk1 = build_cone_knuckle_block(
+                sr1_x0,
+                sr1_x1,
+                ky0,
+                ky1,
+                0.0,
+                sash_t,
+                HingeFace::PosX,
+                socket_r,
+                socket_len,
+                true,
+                16,
+            );
+
+            cut_boxes.push(rect_bounds(sx0 - 0.2, cy_notch0, sl0_x0 + 0.01, cy_notch1));
+            cut_boxes.push(rect_bounds(sr1_x1 - 0.01, cy_notch0, sx1 + 0.2, cy_notch1));
+            cut_boxes.push(rect_bounds(
+                sl0_x0 - 0.01,
+                cy_notch0,
+                (sl0_x1 - sock_embed).max(sl0_x0 + 0.2),
+                cy_notch1,
+            ));
+            cut_boxes.push(rect_bounds(
+                (sr1_x0 + sock_embed).min(sr1_x1 - 0.2),
+                cy_notch0,
+                sr1_x1 + 0.01,
+                cy_notch1,
+            ));
+
+            (
+                fk0,
+                fk1,
+                sk0,
+                sk1,
+                sx0 + other_stile,
+                sx1 - other_stile,
+                gy0,
+                gy1,
+                [
+                    ((sx0 + sx1) * 0.5) as f32,
+                    ((ky0 + ky1) * 0.5) as f32,
+                    (sash_t * 0.5) as f32,
+                ],
+                [1.0, 0.0, 0.0],
+                swing_dir,
+            )
+        }
+    };
 
     let gx_lo = gx0.min(gx1 - 3.0);
     let gx_hi = gx1.max(gx0 + 3.0);
@@ -1503,19 +1607,43 @@ fn build_one_cone_hinged_sash(
     let sash_bars = intersection_shapes(&bars_raw, &bar_clip);
 
     let notch_shapes = union_contours(&cut_boxes);
-    let sash_front_region = difference_shapes(&union_shapes(&sash_frame_raw, &sash_bars), &notch_shapes);
+    let sash_front_region =
+        difference_shapes(&union_shapes(&sash_frame_raw, &sash_bars), &notch_shapes);
 
     // Rear acetate pocket (strictly inset inside the solid sash rim, away from cone sockets)
     let hinge_rebate = (hinge_stile - k_thick - 0.32).max(0.45);
     let std_rebate = (other_stile * 0.38).clamp(0.65, 1.3);
     let (ax0, ax1, ay0, ay1) = match hinge_edge {
-        SashHingeEdge::Left => (gx_lo - hinge_rebate, gx_hi + std_rebate, gy_lo - std_rebate, gy_hi + std_rebate),
-        SashHingeEdge::Right => (gx_lo - std_rebate, gx_hi + hinge_rebate, gy_lo - std_rebate, gy_hi + std_rebate),
-        SashHingeEdge::Top => (gx_lo - std_rebate, gx_hi + std_rebate, gy_lo - std_rebate, gy_hi + hinge_rebate),
-        SashHingeEdge::Bottom => (gx_lo - std_rebate, gx_hi + std_rebate, gy_lo - hinge_rebate, gy_hi + std_rebate),
+        SashHingeEdge::Left => (
+            gx_lo - hinge_rebate,
+            gx_hi + std_rebate,
+            gy_lo - std_rebate,
+            gy_hi + std_rebate,
+        ),
+        SashHingeEdge::Right => (
+            gx_lo - std_rebate,
+            gx_hi + hinge_rebate,
+            gy_lo - std_rebate,
+            gy_hi + std_rebate,
+        ),
+        SashHingeEdge::Top => (
+            gx_lo - std_rebate,
+            gx_hi + std_rebate,
+            gy_lo - std_rebate,
+            gy_hi + hinge_rebate,
+        ),
+        SashHingeEdge::Bottom => (
+            gx_lo - std_rebate,
+            gx_hi + std_rebate,
+            gy_lo - hinge_rebate,
+            gy_hi + std_rebate,
+        ),
     };
     let ac_pocket_region = shape_from_contour(rect_bounds(ax0, ay0, ax1, ay1));
-    let sash_rear_region = difference_shapes(&difference_shapes(&sash_outer, &ac_pocket_region), &notch_shapes);
+    let sash_rear_region = difference_shapes(
+        &difference_shapes(&sash_outer, &ac_pocket_region),
+        &notch_shapes,
+    );
 
     let ac_depth = (params.acetate_thickness + 0.45).clamp(0.7, (sash_t - 1.3).max(0.7));
     let front_z1 = (sash_t - ac_depth).max(1.2);
@@ -1533,7 +1661,9 @@ fn build_one_cone_hinged_sash(
     }
 
     let bar_c = if params.chamfer_bars {
-        let c = params.bar_chamfer_size.min((params.bar_width * 0.28).min(0.40));
+        let c = params
+            .bar_chamfer_size
+            .min((params.bar_width * 0.28).min(0.40));
         (c >= 0.10).then_some((c, c * 1.15))
     } else {
         None
@@ -1611,12 +1741,7 @@ fn build_style_bars(params: &WindowParams, specs: &WindowSpecs, _glass: &Shapes2
             }
             // Extra center mullion in lower bay if bars_x >= 3
             if params.bars_x >= 3 && lower_h > 4.0 {
-                contours.push(rect_bounds(
-                    -bw * 0.5,
-                    -gh * 0.5 - 2.0,
-                    bw * 0.5,
-                    y_transom,
-                ));
+                contours.push(rect_bounds(-bw * 0.5, -gh * 0.5 - 2.0, bw * 0.5, y_transom));
             }
 
             let base_bars = union_contours(&contours);
@@ -1629,12 +1754,8 @@ fn build_style_bars(params: &WindowParams, specs: &WindowSpecs, _glass: &Shapes2
                     r_mid + mw * 0.5,
                     32,
                 );
-                let arch_mask = shape_from_contour(rect_bounds(
-                    -gw,
-                    y_transom - mw * 0.5,
-                    gw,
-                    gh + 10.0,
-                ));
+                let arch_mask =
+                    shape_from_contour(rect_bounds(-gw, y_transom - mw * 0.5, gw, gh + 10.0));
                 let clipped_ring = intersection_shapes(&vec![ring], &arch_mask);
                 return union_shapes(&base_bars, &clipped_ring);
             }
@@ -1683,7 +1804,8 @@ fn build_style_bars(params: &WindowParams, specs: &WindowSpecs, _glass: &Shapes2
             let upper_h = (gh * 0.5) - (y_split + mw * 0.5);
             if upper_h > 4.0 && params.bars_y > 0 {
                 for i in 1..=params.bars_y {
-                    let y = (y_split + mw * 0.5) + upper_h * (i as f64 / (params.bars_y + 1) as f64);
+                    let y =
+                        (y_split + mw * 0.5) + upper_h * (i as f64 / (params.bars_y + 1) as f64);
                     contours.push(rect_centered(0.0, y, gw + 2.0, bw));
                 }
             }
@@ -1781,10 +1903,17 @@ fn build_style_bars(params: &WindowParams, specs: &WindowSpecs, _glass: &Shapes2
                 }
                 // Decorative half-hub ring at spring center
                 let hub_r = (glass_r * 0.28).clamp(bw * 1.5, 10.0);
-                let ring = ring_shape(0.0, y_spring, (hub_r - bw * 0.5).max(0.5), hub_r + bw * 0.5, 28);
+                let ring = ring_shape(
+                    0.0,
+                    y_spring,
+                    (hub_r - bw * 0.5).max(0.5),
+                    hub_r + bw * 0.5,
+                    28,
+                );
                 let base_bars = union_contours(&contours);
                 let hub_shapes = vec![ring];
-                let arch_mask = shape_from_contour(rect_bounds(-gw, y_spring - bw * 0.5, gw, gh + 10.0));
+                let arch_mask =
+                    shape_from_contour(rect_bounds(-gw, y_spring - bw * 0.5, gw, gh + 10.0));
                 let clipped_hub = intersection_shapes(&hub_shapes, &arch_mask);
                 return union_shapes(&base_bars, &clipped_hub);
             }
@@ -1814,8 +1943,16 @@ fn build_style_bars(params: &WindowParams, specs: &WindowSpecs, _glass: &Shapes2
             let y_apex = gh * 0.5;
             if glass_half > 5.0 {
                 let mid_y = (y_spring + y_apex) * 0.52;
-                contours.push(segment_bar([0.0, y_spring], [-glass_half * 0.65, mid_y + 3.0], bw));
-                contours.push(segment_bar([0.0, y_spring], [glass_half * 0.65, mid_y + 3.0], bw));
+                contours.push(segment_bar(
+                    [0.0, y_spring],
+                    [-glass_half * 0.65, mid_y + 3.0],
+                    bw,
+                ));
+                contours.push(segment_bar(
+                    [0.0, y_spring],
+                    [glass_half * 0.65, mid_y + 3.0],
+                    bw,
+                ));
             }
         }
 
@@ -1859,8 +1996,18 @@ fn build_style_bars(params: &WindowParams, specs: &WindowSpecs, _glass: &Shapes2
             // Left and right vertical prairie stiles running full height
             let x_l = -gw * 0.5 + inset;
             let x_r = gw * 0.5 - inset;
-            contours.push(rect_bounds(x_l - bw * 0.5, -gh * 0.5 - 2.0, x_l + bw * 0.5, gh * 0.5 + 2.0));
-            contours.push(rect_bounds(x_r - bw * 0.5, -gh * 0.5 - 2.0, x_r + bw * 0.5, gh * 0.5 + 2.0));
+            contours.push(rect_bounds(
+                x_l - bw * 0.5,
+                -gh * 0.5 - 2.0,
+                x_l + bw * 0.5,
+                gh * 0.5 + 2.0,
+            ));
+            contours.push(rect_bounds(
+                x_r - bw * 0.5,
+                -gh * 0.5 - 2.0,
+                x_r + bw * 0.5,
+                gh * 0.5 + 2.0,
+            ));
 
             // Additional upper-sash muntins if cols > 2
             if cols > 2 {
@@ -1880,8 +2027,18 @@ fn build_style_bars(params: &WindowParams, specs: &WindowSpecs, _glass: &Shapes2
             let upper_h = gh * 0.5 - y_transom;
             if upper_h > 6.0 {
                 let y_sub = y_transom + upper_h * 0.48;
-                contours.push(rect_bounds(-gw * 0.5 - 2.0, y_sub - bw * 0.5, x_l, y_sub + bw * 0.5));
-                contours.push(rect_bounds(x_r, y_sub - bw * 0.5, gw * 0.5 + 2.0, y_sub + bw * 0.5));
+                contours.push(rect_bounds(
+                    -gw * 0.5 - 2.0,
+                    y_sub - bw * 0.5,
+                    x_l,
+                    y_sub + bw * 0.5,
+                ));
+                contours.push(rect_bounds(
+                    x_r,
+                    y_sub - bw * 0.5,
+                    gw * 0.5 + 2.0,
+                    y_sub + bw * 0.5,
+                ));
             }
         }
     }
@@ -1890,13 +2047,7 @@ fn build_style_bars(params: &WindowParams, specs: &WindowSpecs, _glass: &Shapes2
     union_contours(&contours)
 }
 
-fn add_even_vertical_bars(
-    contours: &mut Vec<Contour2D>,
-    gw: f64,
-    gh: f64,
-    count: u32,
-    bw: f64,
-) {
+fn add_even_vertical_bars(contours: &mut Vec<Contour2D>, gw: f64, gh: f64, count: u32, bw: f64) {
     if count == 0 {
         return;
     }
@@ -1906,13 +2057,7 @@ fn add_even_vertical_bars(
     }
 }
 
-fn add_even_horizontal_bars(
-    contours: &mut Vec<Contour2D>,
-    gw: f64,
-    gh: f64,
-    count: u32,
-    bw: f64,
-) {
+fn add_even_horizontal_bars(contours: &mut Vec<Contour2D>, gw: f64, gh: f64, count: u32, bw: f64) {
     if count == 0 {
         return;
     }

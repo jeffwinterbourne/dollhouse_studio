@@ -76,8 +76,5 @@ pub fn ray_wall_plane_point(
         return None;
     }
     let hit = ray_orig + ray_dir * t;
-    Some([
-        hit.x as f64 + wall_w * 0.5,
-        hit.z as f64 + wall_h * 0.5,
-    ])
+    Some([hit.x as f64 + wall_w * 0.5, hit.z as f64 + wall_h * 0.5])
 }

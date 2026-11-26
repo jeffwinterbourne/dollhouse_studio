@@ -1,6 +1,8 @@
 use crate::canvas2d::photo_layer::BlueprintXform;
 use crate::theme::StudioPalette;
-use dh_core::{ComponentDef, DisplayUnit, FlushTopMode, ProjectWall, WallOpening, WindowParams, WindowStyle};
+use dh_core::{
+    ComponentDef, DisplayUnit, FlushTopMode, ProjectWall, WallOpening, WindowParams, WindowStyle,
+};
 use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, Shape, Stroke, Vec2};
 use std::collections::HashSet;
 use std::f32::consts::PI;
@@ -97,8 +99,11 @@ pub fn interact_and_draw_openings(
     let primary_pressed = canvas_hovered && ui.input(|i| i.pointer.primary_pressed());
     let primary_down = ui.input(|i| i.pointer.primary_down());
     let primary_released = ui.input(|i| i.pointer.primary_released());
-    let double_clicked =
-        canvas_hovered && ui.input(|i| i.pointer.button_double_clicked(egui::PointerButton::Primary));
+    let double_clicked = canvas_hovered
+        && ui.input(|i| {
+            i.pointer
+                .button_double_clicked(egui::PointerButton::Primary)
+        });
     let ctrl_held = ui.input(|i| i.modifiers.ctrl || i.modifiers.command);
     let shift_held = ui.input(|i| i.modifiers.shift);
 
@@ -113,313 +118,312 @@ pub fn interact_and_draw_openings(
     let top_right_corner = wall_rect.right_top();
 
     // Handle pointer release first.
-    if primary_released
-        && let Some(drag) = state.drag.take() {
-            state.active_guides.clear();
-            match drag {
-                OpeningDragMode::MoveOpenings { .. } => {
-                    actions.push(OpeningsInteraction::FinishedDrag("Move opening(s)"));
-                }
-                OpeningDragMode::ResizeOpening { .. } => {
-                    actions.push(OpeningsInteraction::FinishedDrag("Resize opening"));
-                }
-                OpeningDragMode::ResizeWallEdge { .. } => {
-                    actions.push(OpeningsInteraction::FinishedDrag("Resize wall"));
-                }
-                OpeningDragMode::Marquee {
-                    start_screen,
-                    current_screen,
-                } => {
-                    let marq = Rect::from_two_pos(start_screen, current_screen);
-                    if marq.width() > 6.0 && marq.height() > 6.0 {
-                        let picked: Vec<String> = wall
-                            .openings
-                            .iter()
-                            .filter(|op| {
-                                let r = opening_screen_rect(xform, op, components);
-                                r.intersects(marq)
-                            })
-                            .map(|op| op.id.clone())
-                            .collect();
-                        actions.push(OpeningsInteraction::SetSelection(picked));
-                    }
+    if primary_released && let Some(drag) = state.drag.take() {
+        state.active_guides.clear();
+        match drag {
+            OpeningDragMode::MoveOpenings { .. } => {
+                actions.push(OpeningsInteraction::FinishedDrag("Move opening(s)"));
+            }
+            OpeningDragMode::ResizeOpening { .. } => {
+                actions.push(OpeningsInteraction::FinishedDrag("Resize opening"));
+            }
+            OpeningDragMode::ResizeWallEdge { .. } => {
+                actions.push(OpeningsInteraction::FinishedDrag("Resize wall"));
+            }
+            OpeningDragMode::Marquee {
+                start_screen,
+                current_screen,
+            } => {
+                let marq = Rect::from_two_pos(start_screen, current_screen);
+                if marq.width() > 6.0 && marq.height() > 6.0 {
+                    let picked: Vec<String> = wall
+                        .openings
+                        .iter()
+                        .filter(|op| {
+                            let r = opening_screen_rect(xform, op, components);
+                            r.intersects(marq)
+                        })
+                        .map(|op| op.id.clone())
+                        .collect();
+                    actions.push(OpeningsInteraction::SetSelection(picked));
                 }
             }
         }
+    }
 
     // Update hover state.
     state.hovered_opening_id = None;
     if let Some(pos) = pointer_pos
-        && xform.canvas_rect.contains(pos) {
-            for op in wall.openings.iter().rev() {
-                let r = opening_screen_rect(xform, op, components);
-                if r.expand(3.0).contains(pos) {
-                    state.hovered_opening_id = Some(op.id.clone());
-                    break;
-                }
+        && xform.canvas_rect.contains(pos)
+    {
+        for op in wall.openings.iter().rev() {
+            let r = opening_screen_rect(xform, op, components);
+            if r.expand(3.0).contains(pos) {
+                state.hovered_opening_id = Some(op.id.clone());
+                break;
             }
         }
+    }
 
     // Double-click jumps directly to Piece 3D.
-    if allow_edit && double_clicked
-        && let Some(ref hid) = state.hovered_opening_id {
-            actions.push(OpeningsInteraction::DoubleClickOpen3D(hid.clone()));
-            return actions;
-        }
+    if allow_edit
+        && double_clicked
+        && let Some(ref hid) = state.hovered_opening_id
+    {
+        actions.push(OpeningsInteraction::DoubleClickOpen3D(hid.clone()));
+        return actions;
+    }
 
     // Start drags on primary press.
-    if allow_edit && primary_pressed
+    if allow_edit
+        && primary_pressed
         && let Some(pos) = pointer_pos
-            && xform.canvas_rect.contains(pos) {
-                let mut started = false;
+        && xform.canvas_rect.contains(pos)
+    {
+        let mut started = false;
 
-                // 1) Check single selected opening 8 resize handles first.
-                if selected_ids.len() == 1
-                    && let Some(op) = wall.openings.iter().find(|o| o.id == selected_ids[0]) {
-                        let p = op.resolve_params(components);
-                        let r = opening_screen_rect(xform, op, components);
-                        let handles = rect_handles(r);
-                        if let Some((idx, _)) = handles
-                            .iter()
-                            .enumerate()
-                            .find(|(_, pt)| pt.distance(pos) <= 9.0)
-                        {
-                            state.drag = Some(OpeningDragMode::ResizeOpening {
-                                id: op.id.clone(),
-                                handle: idx,
-                                start_mm: xform.screen_to_mm(pos),
-                                orig_x: op.x_from_left,
-                                orig_y: op.y_from_bottom,
-                                orig_w: p.opening_width,
-                                orig_h: p.opening_height,
-                                lock_w: op.lock_width,
-                                lock_h: op.lock_height,
-                            });
-                            started = true;
-                        }
-                    }
-
-                // 2) Check wall outer edge/corner handles (`Top-Right`, `Right Edge`, `Top Edge`).
-                if !started {
-                    let hit_wall_edge = if top_right_corner.distance(pos) <= 10.0 {
-                        Some(2)
-                    } else if (pos.x - wall_rect.right()).abs() <= 7.0
-                        && pos.y >= wall_rect.top()
-                        && pos.y <= wall_rect.bottom()
-                    {
-                        Some(0)
-                    } else if (pos.y - wall_rect.top()).abs() <= 7.0
-                        && pos.x >= wall_rect.left()
-                        && pos.x <= wall_rect.right()
-                    {
-                        Some(1)
-                    } else {
-                        None
-                    };
-                    if let Some(edge) = hit_wall_edge {
-                        state.drag = Some(OpeningDragMode::ResizeWallEdge {
-                            edge,
-                            start_mm: xform.screen_to_mm(pos),
-                            orig_w: wall.width,
-                            orig_h: wall.height,
-                        });
-                        started = true;
-                    }
-                }
-
-                // 3) Hit test openings for selection + move drag.
-                if !started
-                    && let Some(hid) = state.hovered_opening_id.clone() {
-                        if ctrl_held {
-                            actions.push(OpeningsInteraction::ToggleSelect(hid));
-                        } else {
-                            let already = selected_ids.contains(&hid);
-                            if !already {
-                                actions.push(OpeningsInteraction::SelectSingle(hid.clone()));
-                            }
-                            let moving_ids: Vec<String> = if already {
-                                selected_ids.to_vec()
-                            } else {
-                                vec![hid]
-                            };
-                            let origins: Vec<(String, f64, f64)> = wall
-                                .openings
-                                .iter()
-                                .filter(|o| moving_ids.contains(&o.id) && !o.lock_position)
-                                .map(|o| (o.id.clone(), o.x_from_left, o.y_from_bottom))
-                                .collect();
-                            if !origins.is_empty() {
-                                state.drag = Some(OpeningDragMode::MoveOpenings {
-                                    start_mm: xform.screen_to_mm(pos),
-                                    origins,
-                                });
-                            }
-                        }
-                        started = true;
-                    }
-
-                // 4) Empty canvas click starts marquee selection box.
-                if !started {
-                    if !ctrl_held {
-                        actions.push(OpeningsInteraction::ClearSelection);
-                    }
-                    state.drag = Some(OpeningDragMode::Marquee {
-                        start_screen: pos,
-                        current_screen: pos,
-                    });
-                }
-            }
-
-    // Active drag motion.
-    if allow_edit && primary_down
-        && let (Some(pos), Some(drag)) = (pointer_pos, state.drag.as_mut()) {
-            let cur_mm = xform.screen_to_mm(pos);
-            match drag {
-                OpeningDragMode::MoveOpenings { start_mm, origins } => {
-                    let mut dx = cur_mm[0] - start_mm[0];
-                    let mut dy = cur_mm[1] - start_mm[1];
-                    if shift_held {
-                        if dx.abs() >= dy.abs() {
-                            dy = 0.0;
-                        } else {
-                            dx = 0.0;
-                        }
-                    }
-
-                    // Snap primary dragged item against wall edges/center + sibling openings.
-                    let mut guides = Vec::new();
-                    if let Some((lead_id, ox, oy)) = origins.first()
-                        && let Some(lead) = wall.openings.iter().find(|o| &o.id == lead_id) {
-                            let lw = lead.width(components);
-                            let lh = lead.height(components);
-                            let moving_set: HashSet<&str> =
-                                origins.iter().map(|(id, _, _)| id.as_str()).collect();
-                            let cand_x = ox + dx;
-                            let cand_y = oy + dy;
-                            let snap_x = snap_axis_x(
-                                cand_x,
-                                lw,
-                                wall,
-                                components,
-                                &moving_set,
-                                3.5,
-                            );
-                            if let Some((snapped_dx, gx)) = snap_x {
-                                dx += snapped_dx;
-                                guides.push(SnapGuide {
-                                    vertical: true,
-                                    coord_mm: gx,
-                                });
-                            }
-                            let snap_y = snap_axis_y(
-                                cand_y,
-                                lh,
-                                wall,
-                                components,
-                                &moving_set,
-                                3.5,
-                            );
-                            if let Some((snapped_dy, gy)) = snap_y {
-                                dy += snapped_dy;
-                                guides.push(SnapGuide {
-                                    vertical: false,
-                                    coord_mm: gy,
-                                });
-                            }
-                        }
-
-                    state.active_guides = guides;
-                    let moved: Vec<(String, f64, f64)> = origins
-                        .iter()
-                        .map(|(id, ox, oy)| (id.clone(), ox + dx, oy + dy))
-                        .collect();
-                    if !moved.is_empty() {
-                        actions.push(OpeningsInteraction::MoveOpeningsAbsolute(moved));
-                    }
-                }
-                OpeningDragMode::ResizeOpening {
-                    id,
-                    handle,
-                    start_mm,
-                    orig_x,
-                    orig_y,
-                    orig_w,
-                    orig_h,
-                    lock_w,
-                    lock_h,
-                } => {
-                    let dx = cur_mm[0] - start_mm[0];
-                    let dy = cur_mm[1] - start_mm[1];
-                    let mut left = *orig_x;
-                    let mut bottom = *orig_y;
-                    let mut right = *orig_x + *orig_w;
-                    let mut top = *orig_y + *orig_h;
-
-                    if !*lock_w {
-                        match *handle {
-                            0 | 6 | 7 => left = (*orig_x + dx).clamp(0.0, right - 18.0),
-                            2..=4 => right = (*orig_x + *orig_w + dx).clamp(left + 18.0, wall.width),
-                            _ => {}
-                        }
-                    }
-                    if !*lock_h {
-                        match *handle {
-                            0..=2 => top = (*orig_y + *orig_h + dy).clamp(bottom + 18.0, wall.height),
-                            4..=6 => bottom = (*orig_y + dy).clamp(0.0, top - 18.0),
-                            _ => {}
-                        }
-                    }
-                    actions.push(OpeningsInteraction::ResizeOpening {
-                        opening_id: id.clone(),
-                        x_from_left: left,
-                        y_from_bottom: bottom,
-                        width: (right - left).max(18.0),
-                        height: (top - bottom).max(18.0),
-                    });
-                }
-                OpeningDragMode::ResizeWallEdge {
-                    edge,
-                    start_mm,
-                    orig_w,
-                    orig_h,
-                } => {
-                    let dx = cur_mm[0] - start_mm[0];
-                    let dy = cur_mm[1] - start_mm[1];
-                    let mut nw = *orig_w;
-                    let mut nh = *orig_h;
-                    if matches!(*edge, 0 | 2) {
-                        nw = (*orig_w + dx).clamp(60.0, 2000.0);
-                    }
-                    if matches!(*edge, 1 | 2) {
-                        nh = (*orig_h + dy).clamp(60.0, 1500.0);
-                    }
-                    if !shift_held {
-                        nw = (nw / 2.0).round() * 2.0;
-                        nh = (nh / 2.0).round() * 2.0;
-                    }
-                    actions.push(OpeningsInteraction::ResizeWall {
-                        width: nw,
-                        height: nh,
-                    });
-                }
-                OpeningDragMode::Marquee { current_screen, .. } => {
-                    *current_screen = pos;
-                }
+        // 1) Check single selected opening 8 resize handles first.
+        if selected_ids.len() == 1
+            && let Some(op) = wall.openings.iter().find(|o| o.id == selected_ids[0])
+        {
+            let p = op.resolve_params(components);
+            let r = opening_screen_rect(xform, op, components);
+            let handles = rect_handles(r);
+            if let Some((idx, _)) = handles
+                .iter()
+                .enumerate()
+                .find(|(_, pt)| pt.distance(pos) <= 9.0)
+            {
+                state.drag = Some(OpeningDragMode::ResizeOpening {
+                    id: op.id.clone(),
+                    handle: idx,
+                    start_mm: xform.screen_to_mm(pos),
+                    orig_x: op.x_from_left,
+                    orig_y: op.y_from_bottom,
+                    orig_w: p.opening_width,
+                    orig_h: p.opening_height,
+                    lock_w: op.lock_width,
+                    lock_h: op.lock_height,
+                });
+                started = true;
             }
         }
+
+        // 2) Check wall outer edge/corner handles (`Top-Right`, `Right Edge`, `Top Edge`).
+        if !started {
+            let hit_wall_edge = if top_right_corner.distance(pos) <= 10.0 {
+                Some(2)
+            } else if (pos.x - wall_rect.right()).abs() <= 7.0
+                && pos.y >= wall_rect.top()
+                && pos.y <= wall_rect.bottom()
+            {
+                Some(0)
+            } else if (pos.y - wall_rect.top()).abs() <= 7.0
+                && pos.x >= wall_rect.left()
+                && pos.x <= wall_rect.right()
+            {
+                Some(1)
+            } else {
+                None
+            };
+            if let Some(edge) = hit_wall_edge {
+                state.drag = Some(OpeningDragMode::ResizeWallEdge {
+                    edge,
+                    start_mm: xform.screen_to_mm(pos),
+                    orig_w: wall.width,
+                    orig_h: wall.height,
+                });
+                started = true;
+            }
+        }
+
+        // 3) Hit test openings for selection + move drag.
+        if !started && let Some(hid) = state.hovered_opening_id.clone() {
+            if ctrl_held {
+                actions.push(OpeningsInteraction::ToggleSelect(hid));
+            } else {
+                let already = selected_ids.contains(&hid);
+                if !already {
+                    actions.push(OpeningsInteraction::SelectSingle(hid.clone()));
+                }
+                let moving_ids: Vec<String> = if already {
+                    selected_ids.to_vec()
+                } else {
+                    vec![hid]
+                };
+                let origins: Vec<(String, f64, f64)> = wall
+                    .openings
+                    .iter()
+                    .filter(|o| moving_ids.contains(&o.id) && !o.lock_position)
+                    .map(|o| (o.id.clone(), o.x_from_left, o.y_from_bottom))
+                    .collect();
+                if !origins.is_empty() {
+                    state.drag = Some(OpeningDragMode::MoveOpenings {
+                        start_mm: xform.screen_to_mm(pos),
+                        origins,
+                    });
+                }
+            }
+            started = true;
+        }
+
+        // 4) Empty canvas click starts marquee selection box.
+        if !started {
+            if !ctrl_held {
+                actions.push(OpeningsInteraction::ClearSelection);
+            }
+            state.drag = Some(OpeningDragMode::Marquee {
+                start_screen: pos,
+                current_screen: pos,
+            });
+        }
+    }
+
+    // Active drag motion.
+    if allow_edit
+        && primary_down
+        && let (Some(pos), Some(drag)) = (pointer_pos, state.drag.as_mut())
+    {
+        let cur_mm = xform.screen_to_mm(pos);
+        match drag {
+            OpeningDragMode::MoveOpenings { start_mm, origins } => {
+                let mut dx = cur_mm[0] - start_mm[0];
+                let mut dy = cur_mm[1] - start_mm[1];
+                if shift_held {
+                    if dx.abs() >= dy.abs() {
+                        dy = 0.0;
+                    } else {
+                        dx = 0.0;
+                    }
+                }
+
+                // Snap primary dragged item against wall edges/center + sibling openings.
+                let mut guides = Vec::new();
+                if let Some((lead_id, ox, oy)) = origins.first()
+                    && let Some(lead) = wall.openings.iter().find(|o| &o.id == lead_id)
+                {
+                    let lw = lead.width(components);
+                    let lh = lead.height(components);
+                    let moving_set: HashSet<&str> =
+                        origins.iter().map(|(id, _, _)| id.as_str()).collect();
+                    let cand_x = ox + dx;
+                    let cand_y = oy + dy;
+                    let snap_x = snap_axis_x(cand_x, lw, wall, components, &moving_set, 3.5);
+                    if let Some((snapped_dx, gx)) = snap_x {
+                        dx += snapped_dx;
+                        guides.push(SnapGuide {
+                            vertical: true,
+                            coord_mm: gx,
+                        });
+                    }
+                    let snap_y = snap_axis_y(cand_y, lh, wall, components, &moving_set, 3.5);
+                    if let Some((snapped_dy, gy)) = snap_y {
+                        dy += snapped_dy;
+                        guides.push(SnapGuide {
+                            vertical: false,
+                            coord_mm: gy,
+                        });
+                    }
+                }
+
+                state.active_guides = guides;
+                let moved: Vec<(String, f64, f64)> = origins
+                    .iter()
+                    .map(|(id, ox, oy)| (id.clone(), ox + dx, oy + dy))
+                    .collect();
+                if !moved.is_empty() {
+                    actions.push(OpeningsInteraction::MoveOpeningsAbsolute(moved));
+                }
+            }
+            OpeningDragMode::ResizeOpening {
+                id,
+                handle,
+                start_mm,
+                orig_x,
+                orig_y,
+                orig_w,
+                orig_h,
+                lock_w,
+                lock_h,
+            } => {
+                let dx = cur_mm[0] - start_mm[0];
+                let dy = cur_mm[1] - start_mm[1];
+                let mut left = *orig_x;
+                let mut bottom = *orig_y;
+                let mut right = *orig_x + *orig_w;
+                let mut top = *orig_y + *orig_h;
+
+                if !*lock_w {
+                    match *handle {
+                        0 | 6 | 7 => left = (*orig_x + dx).clamp(0.0, right - 18.0),
+                        2..=4 => right = (*orig_x + *orig_w + dx).clamp(left + 18.0, wall.width),
+                        _ => {}
+                    }
+                }
+                if !*lock_h {
+                    match *handle {
+                        0..=2 => top = (*orig_y + *orig_h + dy).clamp(bottom + 18.0, wall.height),
+                        4..=6 => bottom = (*orig_y + dy).clamp(0.0, top - 18.0),
+                        _ => {}
+                    }
+                }
+                actions.push(OpeningsInteraction::ResizeOpening {
+                    opening_id: id.clone(),
+                    x_from_left: left,
+                    y_from_bottom: bottom,
+                    width: (right - left).max(18.0),
+                    height: (top - bottom).max(18.0),
+                });
+            }
+            OpeningDragMode::ResizeWallEdge {
+                edge,
+                start_mm,
+                orig_w,
+                orig_h,
+            } => {
+                let dx = cur_mm[0] - start_mm[0];
+                let dy = cur_mm[1] - start_mm[1];
+                let mut nw = *orig_w;
+                let mut nh = *orig_h;
+                if matches!(*edge, 0 | 2) {
+                    nw = (*orig_w + dx).clamp(60.0, 2000.0);
+                }
+                if matches!(*edge, 1 | 2) {
+                    nh = (*orig_h + dy).clamp(60.0, 1500.0);
+                }
+                if !shift_held {
+                    nw = (nw / 2.0).round() * 2.0;
+                    nh = (nh / 2.0).round() * 2.0;
+                }
+                actions.push(OpeningsInteraction::ResizeWall {
+                    width: nw,
+                    height: nh,
+                });
+            }
+            OpeningDragMode::Marquee { current_screen, .. } => {
+                *current_screen = pos;
+            }
+        }
+    }
 
     // Draw snap guides.
     for g in &state.active_guides {
         if g.vertical {
             let sx = xform.mm_to_screen([g.coord_mm, 0.0]).x;
             painter.line_segment(
-                [Pos2::new(sx, wall_rect.top() - 24.0), Pos2::new(sx, wall_rect.bottom() + 24.0)],
+                [
+                    Pos2::new(sx, wall_rect.top() - 24.0),
+                    Pos2::new(sx, wall_rect.bottom() + 24.0),
+                ],
                 Stroke::new(1.2, pal.gold),
             );
         } else {
             let sy = xform.mm_to_screen([0.0, g.coord_mm]).y;
             painter.line_segment(
-                [Pos2::new(wall_rect.left() - 24.0, sy), Pos2::new(wall_rect.right() + 24.0, sy)],
+                [
+                    Pos2::new(wall_rect.left() - 24.0, sy),
+                    Pos2::new(wall_rect.right() + 24.0, sy),
+                ],
                 Stroke::new(1.2, pal.gold),
             );
         }
@@ -432,21 +436,17 @@ pub fn interact_and_draw_openings(
         let selected = selected_ids.contains(&op.id);
         let hovered = state.hovered_opening_id.as_deref() == Some(op.id.as_str());
         paint_opening_2d(
-            painter,
-            pal,
-            op,
-            &params,
-            components,
-            r,
-            unit,
-            selected,
-            hovered,
+            painter, pal, op, &params, components, r, unit, selected, hovered,
         );
     }
 
     // Paint draggable wall resize edge knobs on wall border (subtle unless hovered).
     if allow_edit {
-        for (idx, pt) in [(0usize, right_edge_mid), (1, top_edge_mid), (2, top_right_corner)] {
+        for (idx, pt) in [
+            (0usize, right_edge_mid),
+            (1, top_edge_mid),
+            (2, top_right_corner),
+        ] {
             let hot = pointer_pos.is_some_and(|p| p.distance(pt) <= 10.0)
                 || matches!(state.drag, Some(OpeningDragMode::ResizeWallEdge { edge, .. }) if edge == idx);
             let r = if hot { 5.5 } else { 4.0 };
@@ -466,7 +466,12 @@ pub fn interact_and_draw_openings(
     {
         let mr = Rect::from_two_pos(start_screen, current_screen);
         painter.rect_filled(mr, 2.0, pal.accent.linear_multiply(0.15));
-        painter.rect_stroke(mr, 2.0, Stroke::new(1.5, pal.accent), egui::StrokeKind::Inside);
+        painter.rect_stroke(
+            mr,
+            2.0,
+            Stroke::new(1.5, pal.accent),
+            egui::StrokeKind::Inside,
+        );
     }
 
     actions
@@ -702,12 +707,7 @@ fn paint_opening_2d(
     }
 }
 
-fn draw_interior_bars(
-    painter: &egui::Painter,
-    inner: Rect,
-    params: &WindowParams,
-    bar: Stroke,
-) {
+fn draw_interior_bars(painter: &egui::Painter, inner: Rect, params: &WindowParams, bar: Stroke) {
     if inner.width() < 8.0 || inner.height() < 8.0 {
         return;
     }
@@ -718,10 +718,30 @@ fn draw_interior_bars(
             inner.right() - 3.5
         };
         painter.circle_filled(Pos2::new(hx, inner.center().y), 2.2, bar.color);
-        let hinge_x = if params.hinge_right { inner.right() } else { inner.left() };
-        let knob_x = if params.hinge_right { inner.left() } else { inner.right() };
-        painter.line_segment([Pos2::new(hinge_x, inner.top()), Pos2::new(knob_x, inner.center().y)], bar);
-        painter.line_segment([Pos2::new(hinge_x, inner.bottom()), Pos2::new(knob_x, inner.center().y)], bar);
+        let hinge_x = if params.hinge_right {
+            inner.right()
+        } else {
+            inner.left()
+        };
+        let knob_x = if params.hinge_right {
+            inner.left()
+        } else {
+            inner.right()
+        };
+        painter.line_segment(
+            [
+                Pos2::new(hinge_x, inner.top()),
+                Pos2::new(knob_x, inner.center().y),
+            ],
+            bar,
+        );
+        painter.line_segment(
+            [
+                Pos2::new(hinge_x, inner.bottom()),
+                Pos2::new(knob_x, inner.center().y),
+            ],
+            bar,
+        );
         return;
     }
 
@@ -730,11 +750,17 @@ fn draw_interior_bars(
         let rows = (params.bars_y + 1).clamp(1, 8) as usize;
         for c in 1..cols {
             let x = inner.left() + inner.width() * (c as f32 / cols as f32);
-            painter.line_segment([Pos2::new(x, inner.top()), Pos2::new(x, inner.bottom())], bar);
+            painter.line_segment(
+                [Pos2::new(x, inner.top()), Pos2::new(x, inner.bottom())],
+                bar,
+            );
         }
         for r in 1..rows {
             let y = inner.top() + inner.height() * (r as f32 / rows as f32);
-            painter.line_segment([Pos2::new(inner.left(), y), Pos2::new(inner.right(), y)], bar);
+            painter.line_segment(
+                [Pos2::new(inner.left(), y), Pos2::new(inner.right(), y)],
+                bar,
+            );
         }
     }
 }

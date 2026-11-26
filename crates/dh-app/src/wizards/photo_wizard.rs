@@ -1,7 +1,10 @@
 use crate::photo_cache::WallPhotoTextureCache;
 use crate::theme::StudioPalette;
 use dh_core::{DisplayUnit, WallPhotoConfig};
-use eframe::egui::{self, Align2, Color32, CornerRadius, FontId, Margin, Pos2, Rect, RichText, Shape, Stroke, StrokeKind, Vec2};
+use eframe::egui::{
+    self, Align2, Color32, CornerRadius, FontId, Margin, Pos2, Rect, RichText, Shape, Stroke,
+    StrokeKind, Vec2,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PhotoWizardStep {
@@ -467,9 +470,31 @@ fn draw_crop_preview_overlay(
         Pos2::new(ir.left() + cr * ir.width(), ir.top() + cb * ir.height()),
     );
     let mask = Color32::from_rgba_unmultiplied(12, 16, 22, 140);
-    painter.rect_filled(Rect::from_min_max(ir.left_top(), Pos2::new(ir.right(), crop_r.top())), 0.0, mask);
-    painter.rect_filled(Rect::from_min_max(Pos2::new(ir.left(), crop_r.bottom()), ir.right_bottom()), 0.0, mask);
-    painter.rect_filled(Rect::from_min_max(Pos2::new(ir.left(), crop_r.top()), Pos2::new(crop_r.left(), crop_r.bottom())), 0.0, mask);
-    painter.rect_filled(Rect::from_min_max(Pos2::new(crop_r.right(), crop_r.top()), Pos2::new(ir.right(), crop_r.bottom())), 0.0, mask);
+    painter.rect_filled(
+        Rect::from_min_max(ir.left_top(), Pos2::new(ir.right(), crop_r.top())),
+        0.0,
+        mask,
+    );
+    painter.rect_filled(
+        Rect::from_min_max(Pos2::new(ir.left(), crop_r.bottom()), ir.right_bottom()),
+        0.0,
+        mask,
+    );
+    painter.rect_filled(
+        Rect::from_min_max(
+            Pos2::new(ir.left(), crop_r.top()),
+            Pos2::new(crop_r.left(), crop_r.bottom()),
+        ),
+        0.0,
+        mask,
+    );
+    painter.rect_filled(
+        Rect::from_min_max(
+            Pos2::new(crop_r.right(), crop_r.top()),
+            Pos2::new(ir.right(), crop_r.bottom()),
+        ),
+        0.0,
+        mask,
+    );
     painter.rect_stroke(crop_r, 1.0, Stroke::new(1.8, pal.gold), StrokeKind::Outside);
 }

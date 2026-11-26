@@ -40,7 +40,10 @@ pub fn paint_icon(painter: &egui::Painter, rect: Rect, icon: VectorIcon, col: Co
             painter.rect_stroke(r, 1.0, s, egui::StrokeKind::Inside);
             painter.line_segment([r.left_center(), r.right_center()], s);
             painter.line_segment(
-                [Pos2::new(r.center().x, r.top()), Pos2::new(r.center().x, r.center().y)],
+                [
+                    Pos2::new(r.center().x, r.top()),
+                    Pos2::new(r.center().x, r.center().y),
+                ],
                 s,
             );
         }
@@ -80,30 +83,48 @@ pub fn paint_icon(painter: &egui::Painter, rect: Rect, icon: VectorIcon, col: Co
         }
         VectorIcon::Crop => {
             painter.line_segment(
-                [Pos2::new(r.left(), r.top() + 3.0), Pos2::new(r.right() - 3.0, r.top() + 3.0)],
+                [
+                    Pos2::new(r.left(), r.top() + 3.0),
+                    Pos2::new(r.right() - 3.0, r.top() + 3.0),
+                ],
                 s,
             );
             painter.line_segment(
-                [Pos2::new(r.left() + 3.0, r.top()), Pos2::new(r.left() + 3.0, r.bottom() - 3.0)],
+                [
+                    Pos2::new(r.left() + 3.0, r.top()),
+                    Pos2::new(r.left() + 3.0, r.bottom() - 3.0),
+                ],
                 s,
             );
             painter.line_segment(
-                [Pos2::new(r.right() - 3.0, r.top() + 3.0), Pos2::new(r.right() - 3.0, r.bottom())],
+                [
+                    Pos2::new(r.right() - 3.0, r.top() + 3.0),
+                    Pos2::new(r.right() - 3.0, r.bottom()),
+                ],
                 s,
             );
             painter.line_segment(
-                [Pos2::new(r.left() + 3.0, r.bottom() - 3.0), Pos2::new(r.right(), r.bottom() - 3.0)],
+                [
+                    Pos2::new(r.left() + 3.0, r.bottom() - 3.0),
+                    Pos2::new(r.right(), r.bottom() - 3.0),
+                ],
                 s,
             );
         }
         VectorIcon::Ruler => {
             painter.line_segment([r.left_center(), r.right_center()], s);
             painter.line_segment(
-                [Pos2::new(r.left(), r.top() + 2.0), Pos2::new(r.left(), r.bottom() - 2.0)],
+                [
+                    Pos2::new(r.left(), r.top() + 2.0),
+                    Pos2::new(r.left(), r.bottom() - 2.0),
+                ],
                 s,
             );
             painter.line_segment(
-                [Pos2::new(r.right(), r.top() + 2.0), Pos2::new(r.right(), r.bottom() - 2.0)],
+                [
+                    Pos2::new(r.right(), r.top() + 2.0),
+                    Pos2::new(r.right(), r.bottom() - 2.0),
+                ],
                 s,
             );
         }
@@ -125,18 +146,27 @@ pub fn paint_icon(painter: &egui::Painter, rect: Rect, icon: VectorIcon, col: Co
             let pr = Rect::from_center_size(r.center(), Vec2::new(r.width() * 0.8, r.height()));
             painter.rect_stroke(pr, 1.0, s, egui::StrokeKind::Inside);
             painter.line_segment(
-                [Pos2::new(pr.left() + 2.5, pr.center().y - 2.0), Pos2::new(pr.right() - 2.5, pr.center().y - 2.0)],
+                [
+                    Pos2::new(pr.left() + 2.5, pr.center().y - 2.0),
+                    Pos2::new(pr.right() - 2.5, pr.center().y - 2.0),
+                ],
                 s,
             );
             painter.line_segment(
-                [Pos2::new(pr.left() + 2.5, pr.center().y + 2.0), Pos2::new(pr.right() - 2.5, pr.center().y + 2.0)],
+                [
+                    Pos2::new(pr.left() + 2.5, pr.center().y + 2.0),
+                    Pos2::new(pr.right() - 2.5, pr.center().y + 2.0),
+                ],
                 s,
             );
         }
         VectorIcon::Save => {
             painter.rect_stroke(r, 1.5, s, egui::StrokeKind::Inside);
             painter.rect_filled(
-                Rect::from_min_size(Pos2::new(r.left() + 3.0, r.top() + 1.0), Vec2::new(r.width() - 6.0, 4.0)),
+                Rect::from_min_size(
+                    Pos2::new(r.left() + 3.0, r.top() + 1.0),
+                    Vec2::new(r.width() - 6.0, 4.0),
+                ),
                 0.5,
                 col,
             );
@@ -149,7 +179,10 @@ pub fn paint_icon(painter: &egui::Painter, rect: Rect, icon: VectorIcon, col: Co
                 egui::StrokeKind::Inside,
             );
             painter.line_segment(
-                [Pos2::new(r.left() + 1.0, r.top() + 2.5), Pos2::new(r.center().x, r.top() + 0.5)],
+                [
+                    Pos2::new(r.left() + 1.0, r.top() + 2.5),
+                    Pos2::new(r.center().x, r.top() + 0.5),
+                ],
                 s,
             );
         }
@@ -184,7 +217,11 @@ pub fn draw_style_thumbnail(
     } else {
         Color32::from_rgba_unmultiplied(85, 160, 220, 75)
     };
-    let outline_col = if selected { pal.accent } else { pal.border_strong };
+    let outline_col = if selected {
+        pal.accent
+    } else {
+        pal.border_strong
+    };
     let bar_stroke = Stroke::new(1.4, frame_col);
     let heavy_stroke = Stroke::new(2.3, frame_col);
     let border_stroke = Stroke::new(1.3, outline_col);
@@ -281,7 +318,10 @@ pub fn draw_style_thumbnail(
             for i in 1..=3 {
                 let t = (i as f32 / 4.0) * PI;
                 painter.line_segment(
-                    [Pos2::new(cx, bot), Pos2::new(cx + rx * t.cos(), bot - h * t.sin())],
+                    [
+                        Pos2::new(cx, bot),
+                        Pos2::new(cx + rx * t.cos(), bot - h * t.sin()),
+                    ],
                     bar_stroke,
                 );
             }
@@ -313,7 +353,11 @@ pub fn draw_style_thumbnail(
                 painter.rect_filled(fg, 4.0, glass_col);
                 painter.rect_stroke(fg, 4.0, bar_stroke, egui::StrokeKind::Middle);
             } else {
-                let rows = if style == WindowStyle::DoorGeorgian6Panel { 3 } else { 2 };
+                let rows = if style == WindowStyle::DoorGeorgian6Panel {
+                    3
+                } else {
+                    2
+                };
                 let pw = (w - 10.0) * 0.5;
                 let ph = (h - 8.0 - (rows as f32 - 1.0) * 3.0) / rows as f32;
                 for r in 0..rows {
@@ -329,7 +373,12 @@ pub fn draw_style_thumbnail(
                     }
                 }
             }
-            painter.rect_stroke(door_rect, 1.0, Stroke::new(2.5, frame_col), egui::StrokeKind::Middle);
+            painter.rect_stroke(
+                door_rect,
+                1.0,
+                Stroke::new(2.5, frame_col),
+                egui::StrokeKind::Middle,
+            );
             painter.circle_filled(
                 Pos2::new(door_rect.right() - 4.5, door_rect.center().y + 2.0),
                 1.6,
@@ -356,27 +405,45 @@ pub fn draw_style_thumbnail(
                 WindowStyle::GeorgianGrid => {
                     for c in 1..=2 {
                         let x = wr.left() + w * (c as f32 / 3.0);
-                        painter.line_segment([Pos2::new(x, wr.top()), Pos2::new(x, wr.bottom())], bar_stroke);
+                        painter.line_segment(
+                            [Pos2::new(x, wr.top()), Pos2::new(x, wr.bottom())],
+                            bar_stroke,
+                        );
                     }
                     for r in 1..=3 {
                         let y = wr.top() + h * (r as f32 / 4.0);
-                        painter.line_segment([Pos2::new(wr.left(), y), Pos2::new(wr.right(), y)], bar_stroke);
+                        painter.line_segment(
+                            [Pos2::new(wr.left(), y), Pos2::new(wr.right(), y)],
+                            bar_stroke,
+                        );
                     }
                 }
                 WindowStyle::SashSplit => {
                     let ym = wr.center().y;
                     for c in 1..=2 {
                         let x = wr.left() + w * (c as f32 / 3.0);
-                        painter.line_segment([Pos2::new(x, wr.top()), Pos2::new(x, wr.bottom())], bar_stroke);
+                        painter.line_segment(
+                            [Pos2::new(x, wr.top()), Pos2::new(x, wr.bottom())],
+                            bar_stroke,
+                        );
                     }
-                    painter.line_segment([Pos2::new(wr.left(), ym), Pos2::new(wr.right(), ym)], heavy_stroke);
+                    painter.line_segment(
+                        [Pos2::new(wr.left(), ym), Pos2::new(wr.right(), ym)],
+                        heavy_stroke,
+                    );
                 }
                 WindowStyle::CasementSplit => {
                     let yt = wr.top() + h * 0.28;
-                    painter.line_segment([Pos2::new(wr.left(), yt), Pos2::new(wr.right(), yt)], heavy_stroke);
+                    painter.line_segment(
+                        [Pos2::new(wr.left(), yt), Pos2::new(wr.right(), yt)],
+                        heavy_stroke,
+                    );
                     for c in 1..=2 {
                         let x = wr.left() + w * (c as f32 / 3.0);
-                        painter.line_segment([Pos2::new(x, wr.top()), Pos2::new(x, wr.bottom())], heavy_stroke);
+                        painter.line_segment(
+                            [Pos2::new(x, wr.top()), Pos2::new(x, wr.bottom())],
+                            heavy_stroke,
+                        );
                     }
                 }
                 WindowStyle::CottageLattice => {
@@ -384,11 +451,17 @@ pub fn draw_style_thumbnail(
                     for k in -6..=6 {
                         let off = k as f32 * 7.0;
                         clipped.line_segment(
-                            [Pos2::new(wr.left() + off - 16.0, wr.top() - 16.0), Pos2::new(wr.left() + off + 48.0, wr.top() + 48.0)],
+                            [
+                                Pos2::new(wr.left() + off - 16.0, wr.top() - 16.0),
+                                Pos2::new(wr.left() + off + 48.0, wr.top() + 48.0),
+                            ],
                             bar_stroke,
                         );
                         clipped.line_segment(
-                            [Pos2::new(wr.right() - off + 16.0, wr.top() - 16.0), Pos2::new(wr.right() - off - 48.0, wr.top() + 48.0)],
+                            [
+                                Pos2::new(wr.right() - off + 16.0, wr.top() - 16.0),
+                                Pos2::new(wr.right() - off - 48.0, wr.top() + 48.0),
+                            ],
                             bar_stroke,
                         );
                     }
@@ -397,22 +470,50 @@ pub fn draw_style_thumbnail(
                     let yt = wr.top() + h * 0.28;
                     let xl = wr.left() + w * 0.22;
                     let xr = wr.right() - w * 0.22;
-                    painter.line_segment([Pos2::new(wr.left(), yt), Pos2::new(wr.right(), yt)], heavy_stroke);
-                    painter.line_segment([Pos2::new(xl, wr.top()), Pos2::new(xl, wr.bottom())], bar_stroke);
-                    painter.line_segment([Pos2::new(xr, wr.top()), Pos2::new(xr, wr.bottom())], bar_stroke);
+                    painter.line_segment(
+                        [Pos2::new(wr.left(), yt), Pos2::new(wr.right(), yt)],
+                        heavy_stroke,
+                    );
+                    painter.line_segment(
+                        [Pos2::new(xl, wr.top()), Pos2::new(xl, wr.bottom())],
+                        bar_stroke,
+                    );
+                    painter.line_segment(
+                        [Pos2::new(xr, wr.top()), Pos2::new(xr, wr.bottom())],
+                        bar_stroke,
+                    );
                 }
                 WindowStyle::PalladianVenetian => {
                     let xl = wr.center().x - w * 0.22;
                     let xr = wr.center().x + w * 0.22;
                     let yt = wr.top() + h * 0.34;
-                    painter.line_segment([Pos2::new(xl, wr.top()), Pos2::new(xl, wr.bottom())], heavy_stroke);
-                    painter.line_segment([Pos2::new(xr, wr.top()), Pos2::new(xr, wr.bottom())], heavy_stroke);
-                    painter.line_segment([Pos2::new(wr.left(), yt), Pos2::new(wr.right(), yt)], heavy_stroke);
+                    painter.line_segment(
+                        [Pos2::new(xl, wr.top()), Pos2::new(xl, wr.bottom())],
+                        heavy_stroke,
+                    );
+                    painter.line_segment(
+                        [Pos2::new(xr, wr.top()), Pos2::new(xr, wr.bottom())],
+                        heavy_stroke,
+                    );
+                    painter.line_segment(
+                        [Pos2::new(wr.left(), yt), Pos2::new(wr.right(), yt)],
+                        heavy_stroke,
+                    );
                 }
                 _ => {}
             }
-            painter.rect_stroke(wr, 1.0, Stroke::new(2.8, frame_col), egui::StrokeKind::Middle);
-            painter.rect_stroke(wr.expand(1.5), 1.5, border_stroke, egui::StrokeKind::Outside);
+            painter.rect_stroke(
+                wr,
+                1.0,
+                Stroke::new(2.8, frame_col),
+                egui::StrokeKind::Middle,
+            );
+            painter.rect_stroke(
+                wr.expand(1.5),
+                1.5,
+                border_stroke,
+                egui::StrokeKind::Outside,
+            );
             draw_sill(painter, wr.center().x, wr.bottom() + 1.5, w, frame_col);
         }
     }

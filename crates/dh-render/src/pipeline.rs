@@ -357,7 +357,9 @@ fn render_gl(gl: &glow::Context, info: &egui::PaintCallbackInfo, st: &mut Viewpo
         let int_cy = (int_min[1] + int_max[1]) * 0.5;
 
         let grid_z = match settings.view_mode {
-            ViewMode::Exploded | ViewMode::Assembled => -(params.opening_height as f32 * 0.5 + 14.0),
+            ViewMode::Exploded | ViewMode::Assembled => {
+                -(params.opening_height as f32 * 0.5 + 14.0)
+            }
             _ => 0.0,
         };
 
@@ -408,7 +410,12 @@ fn render_gl(gl: &glow::Context, info: &egui::PaintCallbackInfo, st: &mut Viewpo
             gl.use_program(Some(pipeline.mesh_program));
             gl.uniform_matrix_4_f32_slice(pipeline.u_mvp.as_ref(), false, mvp.as_ref());
             gl.uniform_matrix_4_f32_slice(pipeline.u_model.as_ref(), false, model.as_ref());
-            gl.uniform_3_f32(pipeline.u_eye.as_ref(), camera_eye.x, camera_eye.y, camera_eye.z);
+            gl.uniform_3_f32(
+                pipeline.u_eye.as_ref(),
+                camera_eye.x,
+                camera_eye.y,
+                camera_eye.z,
+            );
             gl.uniform_3_f32(pipeline.u_color.as_ref(), color[0], color[1], color[2]);
             gl.uniform_1_f32(pipeline.u_alpha.as_ref(), alpha);
             gl.uniform_1_i32(pipeline.u_overhang_mode.as_ref(), overhang_chk);
@@ -451,7 +458,11 @@ fn render_gl(gl: &glow::Context, info: &egui::PaintCallbackInfo, st: &mut Viewpo
                         items.push((m, window.interior_half.bounds(), int_color));
                     }
                     for (idx, lg) in pipeline.leaf_gpus.iter().enumerate() {
-                        items.push((&lg.main_gpu, window.door_leaves[idx].mesh.bounds(), door_color));
+                        items.push((
+                            &lg.main_gpu,
+                            window.door_leaves[idx].mesh.bounds(),
+                            door_color,
+                        ));
                         if let (Some(em), Some(em_mesh)) =
                             (&lg.ext_gpu, &window.door_leaves[idx].exterior_leaf)
                         {
@@ -495,37 +506,83 @@ fn render_gl(gl: &glow::Context, info: &egui::PaintCallbackInfo, st: &mut Viewpo
                         -int_cy,
                         0.0,
                     ));
-                    draw_part(&pipeline.ext_gpu, m_ext, ext_color, 1.0, settings.show_wireframe, overhang_flag);
+                    draw_part(
+                        &pipeline.ext_gpu,
+                        m_ext,
+                        ext_color,
+                        1.0,
+                        settings.show_wireframe,
+                        overhang_flag,
+                    );
                     let sash_color = [
                         (ext_color[0] * 0.90 + 0.08).min(1.0),
                         (ext_color[1] * 0.90 + 0.07).min(1.0),
                         (ext_color[2] * 0.90 + 0.04).min(1.0),
                     ];
                     for sg in &pipeline.sash_gpus {
-                        draw_gpu(&sg.mesh_gpu, m_ext, sash_color, 1.0, settings.show_wireframe, overhang_flag);
+                        draw_gpu(
+                            &sg.mesh_gpu,
+                            m_ext,
+                            sash_color,
+                            1.0,
+                            settings.show_wireframe,
+                            overhang_flag,
+                        );
                     }
-                    draw_part(&pipeline.int_gpu, m_int, int_color, 1.0, settings.show_wireframe, overhang_flag);
+                    draw_part(
+                        &pipeline.int_gpu,
+                        m_int,
+                        int_color,
+                        1.0,
+                        settings.show_wireframe,
+                        overhang_flag,
+                    );
                 }
             }
             ViewMode::ExteriorOnly => {
                 let m_ext = Mat4::from_translation(Vec3::new(-ext_cx, -ext_cy, 0.0));
-                draw_part(&pipeline.ext_gpu, m_ext, ext_color, 1.0, settings.show_wireframe, overhang_flag);
+                draw_part(
+                    &pipeline.ext_gpu,
+                    m_ext,
+                    ext_color,
+                    1.0,
+                    settings.show_wireframe,
+                    overhang_flag,
+                );
                 let sash_color = [
                     (ext_color[0] * 0.90 + 0.08).min(1.0),
                     (ext_color[1] * 0.90 + 0.07).min(1.0),
                     (ext_color[2] * 0.90 + 0.04).min(1.0),
                 ];
                 for sg in &pipeline.sash_gpus {
-                    draw_gpu(&sg.mesh_gpu, m_ext, sash_color, 1.0, settings.show_wireframe, overhang_flag);
+                    draw_gpu(
+                        &sg.mesh_gpu,
+                        m_ext,
+                        sash_color,
+                        1.0,
+                        settings.show_wireframe,
+                        overhang_flag,
+                    );
                 }
             }
             ViewMode::InteriorOnly => {
                 let m_int = Mat4::from_translation(Vec3::new(-int_cx, -int_cy, 0.0));
-                draw_part(&pipeline.int_gpu, m_int, int_color, 1.0, settings.show_wireframe, overhang_flag);
+                draw_part(
+                    &pipeline.int_gpu,
+                    m_int,
+                    int_color,
+                    1.0,
+                    settings.show_wireframe,
+                    overhang_flag,
+                );
             }
             ViewMode::Exploded | ViewMode::Assembled => {
                 let is_exploded = settings.view_mode == ViewMode::Exploded;
-                let gap = if is_exploded { settings.explode_distance } else { 0.0 };
+                let gap = if is_exploded {
+                    settings.explode_distance
+                } else {
+                    0.0
+                };
 
                 let m_ext = stand_upright
                     * Mat4::from_translation(Vec3::new(0.0, 0.0, center_z_shift - gap));
@@ -540,8 +597,22 @@ fn render_gl(gl: &glow::Context, info: &egui::PaintCallbackInfo, st: &mut Viewpo
                 let m_int =
                     stand_upright * Mat4::from_translation(Vec3::new(0.0, 0.0, int_z)) * flip_y;
 
-                draw_part(&pipeline.ext_gpu, m_ext, ext_color, 1.0, settings.show_wireframe, 0);
-                draw_part(&pipeline.int_gpu, m_int, int_color, 1.0, settings.show_wireframe, 0);
+                draw_part(
+                    &pipeline.ext_gpu,
+                    m_ext,
+                    ext_color,
+                    1.0,
+                    settings.show_wireframe,
+                    0,
+                );
+                draw_part(
+                    &pipeline.int_gpu,
+                    m_int,
+                    int_color,
+                    1.0,
+                    settings.show_wireframe,
+                    0,
+                );
 
                 if window.is_door {
                     let z_leaf_int = center_z_shift
@@ -570,7 +641,14 @@ fn render_gl(gl: &glow::Context, info: &egui::PaintCallbackInfo, st: &mut Viewpo
                             ))
                             * flip_y;
 
-                        draw_gpu(&lg.main_gpu, leaf_base, door_color, 1.0, settings.show_wireframe, 0);
+                        draw_gpu(
+                            &lg.main_gpu,
+                            leaf_base,
+                            door_color,
+                            1.0,
+                            settings.show_wireframe,
+                            0,
+                        );
 
                         if let Some(ext_leaf) = &lg.ext_gpu {
                             let ext_shift = if is_exploded { -gap * 0.55 } else { 0.0 };
@@ -581,7 +659,14 @@ fn render_gl(gl: &glow::Context, info: &egui::PaintCallbackInfo, st: &mut Viewpo
                                     0.0,
                                     z_leaf_int - meta.leaf_thickness + ext_shift,
                                 ));
-                            draw_gpu(ext_leaf, m_ext_leaf, ext_color, 1.0, settings.show_wireframe, 0);
+                            draw_gpu(
+                                ext_leaf,
+                                m_ext_leaf,
+                                ext_color,
+                                1.0,
+                                settings.show_wireframe,
+                                0,
+                            );
                         }
 
                         let hw_base = stand_upright
@@ -649,8 +734,9 @@ fn render_gl(gl: &glow::Context, info: &egui::PaintCallbackInfo, st: &mut Viewpo
                         (ext_color[1] * 0.90 + 0.07).min(1.0),
                         (ext_color[2] * 0.90 + 0.04).min(1.0),
                     ];
-                    let sash_t =
-                        (params.trim_thickness + 1.2).clamp(3.6, specs.ext_seat_z.clamp(3.6, 4.6)) as f32;
+                    let sash_t = (params.trim_thickness + 1.2)
+                        .clamp(3.6, specs.ext_seat_z.clamp(3.6, 4.6))
+                        as f32;
                     let sash_ac_z = (sash_t - params.acetate_thickness as f32 - 0.15).max(1.0);
 
                     for (s_idx, sg) in pipeline.sash_gpus.iter().enumerate() {
@@ -660,7 +746,14 @@ fn render_gl(gl: &glow::Context, info: &egui::PaintCallbackInfo, st: &mut Viewpo
                             let sash_rot = Mat4::from_translation(piv)
                                 * Mat4::from_axis_angle(axis, open_rad * meta.swing_dir)
                                 * Mat4::from_translation(-piv);
-                            draw_gpu(&sg.mesh_gpu, m_ext * sash_rot, sash_color, 1.0, settings.show_wireframe, 0);
+                            draw_gpu(
+                                &sg.mesh_gpu,
+                                m_ext * sash_rot,
+                                sash_color,
+                                1.0,
+                                settings.show_wireframe,
+                                0,
+                            );
                         }
                     }
 
@@ -684,8 +777,9 @@ fn render_gl(gl: &glow::Context, info: &egui::PaintCallbackInfo, st: &mut Viewpo
                             let sash_rot = Mat4::from_translation(piv)
                                 * Mat4::from_axis_angle(axis, open_rad * meta.swing_dir)
                                 * Mat4::from_translation(-piv);
-                            let m_sash_ac =
-                                m_ext * sash_rot * Mat4::from_translation(Vec3::new(0.0, 0.0, sash_ac_z));
+                            let m_sash_ac = m_ext
+                                * sash_rot
+                                * Mat4::from_translation(Vec3::new(0.0, 0.0, sash_ac_z));
                             draw_gpu(ac_m, m_sash_ac, [0.42, 0.78, 0.96], 0.42, false, 0);
                         }
                     }
@@ -833,7 +927,12 @@ fn render_project_wall_gl(
             gl.use_program(Some(pipeline.mesh_program));
             gl.uniform_matrix_4_f32_slice(pipeline.u_mvp.as_ref(), false, mvp.as_ref());
             gl.uniform_matrix_4_f32_slice(pipeline.u_model.as_ref(), false, model.as_ref());
-            gl.uniform_3_f32(pipeline.u_eye.as_ref(), camera_eye.x, camera_eye.y, camera_eye.z);
+            gl.uniform_3_f32(
+                pipeline.u_eye.as_ref(),
+                camera_eye.x,
+                camera_eye.y,
+                camera_eye.z,
+            );
             gl.uniform_3_f32(pipeline.u_color.as_ref(), color[0], color[1], color[2]);
             gl.uniform_1_f32(pipeline.u_alpha.as_ref(), alpha);
             gl.uniform_1_i32(pipeline.u_overhang_mode.as_ref(), 0);
@@ -882,7 +981,14 @@ fn render_project_wall_gl(
         let use_tex_on_wall = photo_show_3d && pipeline.wall_photo_tex.is_some();
         if wall_solid && let Some(wm) = &pipeline.project_wall_gpu {
             let m_wall = stand_upright * Mat4::from_translation(Vec3::new(0.0, 0.0, wall_z_shift));
-            draw_gpu(wm, m_wall, wall_mesh_col, 1.0, settings.show_wireframe, use_tex_on_wall);
+            draw_gpu(
+                wm,
+                m_wall,
+                wall_mesh_col,
+                1.0,
+                settings.show_wireframe,
+                use_tex_on_wall,
+            );
         }
 
         let ext_base = settings.filament_color.rgb_exterior();
@@ -918,15 +1024,15 @@ fn render_project_wall_gl(
                 draw_gpu(m, model, ext_col, 1.0, settings.show_wireframe, false);
             }
             if let Some(m) = &op_gpu.int_gpu {
-                let model = stand_upright
-                    * Mat4::from_translation(Vec3::new(*cx, *cy, op_int_z))
-                    * flip_y;
+                let model =
+                    stand_upright * Mat4::from_translation(Vec3::new(*cx, *cy, op_int_z)) * flip_y;
                 draw_gpu(m, model, int_col, 1.0, settings.show_wireframe, false);
             }
 
             if win_gen.is_door {
                 let z_leaf_int = op_z0
-                    + (win_gen.params.trim_thickness + win_gen.specs.effective_wall_thickness) as f32
+                    + (win_gen.params.trim_thickness + win_gen.specs.effective_wall_thickness)
+                        as f32
                     - 0.65;
                 let door_col = highlight_color(door_base, is_sel, is_hov);
 
@@ -946,7 +1052,14 @@ fn render_project_wall_gl(
                             z_leaf_int,
                         ))
                         * flip_y;
-                    draw_gpu(&lg.main_gpu, leaf_model, door_col, 1.0, settings.show_wireframe, false);
+                    draw_gpu(
+                        &lg.main_gpu,
+                        leaf_model,
+                        door_col,
+                        1.0,
+                        settings.show_wireframe,
+                        false,
+                    );
 
                     if let Some(ext_l) = &lg.ext_gpu {
                         let m_ext_l = stand_upright
@@ -986,7 +1099,14 @@ fn render_project_wall_gl(
                         let sash_rot = Mat4::from_translation(piv)
                             * Mat4::from_axis_angle(axis, open_rad * meta.swing_dir)
                             * Mat4::from_translation(-piv);
-                        draw_gpu(&sg.mesh_gpu, m_op_ext * sash_rot, sash_col, 1.0, settings.show_wireframe, false);
+                        draw_gpu(
+                            &sg.mesh_gpu,
+                            m_op_ext * sash_rot,
+                            sash_col,
+                            1.0,
+                            settings.show_wireframe,
+                            false,
+                        );
                     }
                 }
             }
@@ -1003,7 +1123,8 @@ fn render_project_wall_gl(
             let op_z0 = wall_z_shift - win_gen.params.trim_thickness as f32;
             if win_gen.is_door {
                 let z_leaf_int = op_z0
-                    + (win_gen.params.trim_thickness + win_gen.specs.effective_wall_thickness) as f32
+                    + (win_gen.params.trim_thickness + win_gen.specs.effective_wall_thickness)
+                        as f32
                     - 0.65;
                 for (l_idx, lg) in op_gpu.leaf_gpus.iter().enumerate() {
                     if let Some(ac_m) = &lg.ac_gpu {
@@ -1028,19 +1149,20 @@ fn render_project_wall_gl(
             } else if !op_gpu.sash_gpus.is_empty() {
                 let m_op_ext = stand_upright * Mat4::from_translation(Vec3::new(*cx, *cy, op_z0));
                 let sash_t = (win_gen.params.trim_thickness + 1.2)
-                    .clamp(3.6, win_gen.specs.ext_seat_z.clamp(3.6, 4.6)) as f32;
+                    .clamp(3.6, win_gen.specs.ext_seat_z.clamp(3.6, 4.6))
+                    as f32;
                 let sash_ac_z = (sash_t - win_gen.params.acetate_thickness as f32 - 0.15).max(1.0);
                 for (s_idx, sg) in op_gpu.sash_gpus.iter().enumerate() {
-                    if let (Some(ac_m), Some(meta)) =
-                        (&sg.ac_gpu, win_gen.window_sashes.get(s_idx))
+                    if let (Some(ac_m), Some(meta)) = (&sg.ac_gpu, win_gen.window_sashes.get(s_idx))
                     {
                         let piv = Vec3::from(meta.pivot_origin);
                         let axis = Vec3::from(meta.pivot_axis);
                         let sash_rot = Mat4::from_translation(piv)
                             * Mat4::from_axis_angle(axis, open_rad * meta.swing_dir)
                             * Mat4::from_translation(-piv);
-                        let m_sash_ac =
-                            m_op_ext * sash_rot * Mat4::from_translation(Vec3::new(0.0, 0.0, sash_ac_z));
+                        let m_sash_ac = m_op_ext
+                            * sash_rot
+                            * Mat4::from_translation(Vec3::new(0.0, 0.0, sash_ac_z));
                         draw_gpu(ac_m, m_sash_ac, [0.42, 0.78, 0.96], 0.42, false, false);
                     }
                 }

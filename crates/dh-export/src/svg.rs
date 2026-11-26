@@ -15,8 +15,13 @@ pub fn write_window_svg_to_string(window: &GeneratedWindow, title: &str) -> Stri
     let specs = &window.specs;
     let kind = profile_kind(p.style);
 
-    let cutout_contour =
-        profile_contour(kind, p.opening_width, p.opening_height, 0.0, SVG_ARC_SEGMENTS);
+    let cutout_contour = profile_contour(
+        kind,
+        p.opening_width,
+        p.opening_height,
+        0.0,
+        SVG_ARC_SEGMENTS,
+    );
     let trim_contour = clipped_trim_outer_contour(
         kind,
         specs.sleeve_outer_width,
@@ -126,7 +131,14 @@ pub fn write_window_svg_to_string(window: &GeneratedWindow, title: &str) -> Stri
         );
     }
 
-    draw_line_legend(&mut out, margin, total_h - margin - 24.0, content_w, false, has_acetate);
+    draw_line_legend(
+        &mut out,
+        margin,
+        total_h - margin - 24.0,
+        content_w,
+        false,
+        has_acetate,
+    );
     draw_calibration_bar(&mut out, margin, total_h - margin - 5.0);
     out.push_str("</svg>\n");
     out
@@ -135,7 +147,11 @@ pub fn write_window_svg_to_string(window: &GeneratedWindow, title: &str) -> Stri
 /// Writes a 1:1 millimeter SVG elevation & acetate cutting sheet for an entire `ProjectWall`.
 pub fn write_wall_svg_to_string(wall: &ProjectWall, components: &[ComponentDef]) -> String {
     let margin = 18.0;
-    let header_h = if wall.dimensions.is_empty() { 18.0 } else { 26.0 };
+    let header_h = if wall.dimensions.is_empty() {
+        18.0
+    } else {
+        26.0
+    };
     let footer_h = 44.0;
 
     let mut glazed_items: Vec<(String, Contour2D, f64, f64, bool)> = Vec::new();

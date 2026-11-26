@@ -110,7 +110,10 @@ pub fn draw_viewcube(
 
     let box_size = 82.0;
     let cube_rect = Rect::from_min_size(
-        Pos2::new(viewport_rect.right() - box_size - 12.0, viewport_rect.top() + 12.0),
+        Pos2::new(
+            viewport_rect.right() - box_size - 12.0,
+            viewport_rect.top() + 12.0,
+        ),
         Vec2::new(box_size, box_size),
     );
     let iso_btn_rect = Rect::from_min_size(
@@ -179,7 +182,11 @@ pub fn draw_viewcube(
             });
         }
     }
-    visible_faces.sort_by(|a, b| a.depth.partial_cmp(&b.depth).unwrap_or(std::cmp::Ordering::Equal));
+    visible_faces.sort_by(|a, b| {
+        a.depth
+            .partial_cmp(&b.depth)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
     let hover_pos = ui.input(|i| i.pointer.hover_pos());
     let hovered_idx = hover_pos.and_then(|hp| {

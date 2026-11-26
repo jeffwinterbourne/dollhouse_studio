@@ -16,13 +16,13 @@ use crate::wizards::{
     draw_photo_setup_wizard, draw_save_template_modal,
 };
 use dh_core::{
-    ComponentDef, DisplayUnit, OpeningSource, PieceTemplate, Project, ProjectKind,
-    StandalonePiece, TemplateScope, UndoHistory, WallOpening, WindowParams, sanitize_filename,
+    ComponentDef, DisplayUnit, OpeningSource, PieceTemplate, Project, ProjectKind, StandalonePiece,
+    TemplateScope, UndoHistory, WallOpening, WindowParams, sanitize_filename,
 };
 use dh_export::{
     BedSizePreset, PdfExportOptions, export_piece_pdf, export_project_booklet_pdf, export_wall_pdf,
-    export_wall_svg, export_window_svg, pack_project_onto_build_plates, pack_wall_onto_build_plates,
-    write_binary_stl,
+    export_wall_svg, export_window_svg, pack_project_onto_build_plates,
+    pack_wall_onto_build_plates, write_binary_stl,
 };
 use dh_geometry::{GeneratedWindow, WallMeshCache, build_window};
 use dh_project::{
@@ -288,13 +288,13 @@ impl DollhouseStudioApp {
         match ProjectStore::open_dir(&dir) {
             Ok(loaded) => {
                 let recovery_opt = if loaded.has_crash_recovery {
-                    ProjectStore::load_autosave(&dir)
-                        .ok()
-                        .map(|(epoch, proj)| CrashRecoveryPrompt {
+                    ProjectStore::load_autosave(&dir).ok().map(|(epoch, proj)| {
+                        CrashRecoveryPrompt {
                             project_dir: dir.clone(),
                             recovery_epoch: epoch,
                             recovered_project: proj,
-                        })
+                        }
+                    })
                 } else {
                     None
                 };
@@ -321,14 +321,16 @@ impl DollhouseStudioApp {
                 .map(|p| (p.id.clone(), p.params.clone()));
         }
         if let Some(ref cid) = self.active_component_id
-            && let Some(c) = self.project.component(cid) {
-                return Some((c.id.clone(), c.params.clone()));
-            }
+            && let Some(c) = self.project.component(cid)
+        {
+            return Some((c.id.clone(), c.params.clone()));
+        }
         let wall = self.project.active_wall()?;
         if let Some(first_id) = self.selected_opening_ids.first()
-            && let Some(op) = wall.openings.iter().find(|o| &o.id == first_id) {
-                return Some((op.id.clone(), op.resolve_params(&self.project.components)));
-            }
+            && let Some(op) = wall.openings.iter().find(|o| &o.id == first_id)
+        {
+            return Some((op.id.clone(), op.resolve_params(&self.project.components)));
+        }
         wall.openings
             .first()
             .map(|op| (op.id.clone(), op.resolve_params(&self.project.components)))
@@ -377,7 +379,10 @@ impl DollhouseStudioApp {
                 // Rebuild 3D wall meshes only when wall geometry changes cleanly
                 let wall_hash = quick_wall_hash(&wall, &self.project.components);
                 let built_wall = if self.last_wall_mesh_hash != Some(wall_hash) {
-                    let built = Arc::new(self.wall_mesh_cache.build_wall(&wall, &self.project.components));
+                    let built = Arc::new(
+                        self.wall_mesh_cache
+                            .build_wall(&wall, &self.project.components),
+                    );
                     self.last_wall_mesh_hash = Some(wall_hash);
                     Some(built)
                 } else {
@@ -466,12 +471,13 @@ impl DollhouseStudioApp {
                         let ww = wall.width;
                         let wh = wall.height;
                         if let Some(op) = wall.openings.iter_mut().find(|o| o.id == id)
-                            && !op.lock_position {
-                                op.x_from_left = x_from_left;
-                                op.y_from_bottom = y_from_bottom;
-                                op.clamp_to_wall(ww, wh, &comps);
-                                self.mark_live_edit("Move opening in 3D");
-                            }
+                            && !op.lock_position
+                        {
+                            op.x_from_left = x_from_left;
+                            op.y_from_bottom = y_from_bottom;
+                            op.clamp_to_wall(ww, wh, &comps);
+                            self.mark_live_edit("Move opening in 3D");
+                        }
                     }
                 }
                 Viewport3DEvent::ResizeOpening {
@@ -505,34 +511,36 @@ impl DollhouseStudioApp {
         };
         let mut linked_comp_id: Option<String> = None;
         if let Some(wall) = self.project.walls.iter_mut().find(|w| w.id == wid)
-            && let Some(op) = wall.openings.iter_mut().find(|o| o.id == opening_id) {
-                if !op.lock_position {
-                    op.x_from_left = x_from_left;
-                    op.y_from_bottom = y_from_bottom;
-                }
-                let lock_w = op.lock_width;
-                let lock_h = op.lock_height;
-                match &mut op.source {
-                    OpeningSource::Unique { params } => {
-                        if !lock_w {
-                            params.opening_width = width.clamp(18.0, 400.0);
-                        }
-                        if !lock_h {
-                            params.opening_height = height.clamp(18.0, 400.0);
-                        }
+            && let Some(op) = wall.openings.iter_mut().find(|o| o.id == opening_id)
+        {
+            if !op.lock_position {
+                op.x_from_left = x_from_left;
+                op.y_from_bottom = y_from_bottom;
+            }
+            let lock_w = op.lock_width;
+            let lock_h = op.lock_height;
+            match &mut op.source {
+                OpeningSource::Unique { params } => {
+                    if !lock_w {
+                        params.opening_width = width.clamp(18.0, 400.0);
                     }
-                    OpeningSource::Component { component_id, .. } => {
-                        if !lock_w || !lock_h {
-                            linked_comp_id = Some(component_id.clone());
-                        }
+                    if !lock_h {
+                        params.opening_height = height.clamp(18.0, 400.0);
+                    }
+                }
+                OpeningSource::Component { component_id, .. } => {
+                    if !lock_w || !lock_h {
+                        linked_comp_id = Some(component_id.clone());
                     }
                 }
             }
+        }
         if let Some(cid) = linked_comp_id
-            && let Some(comp) = self.project.component_mut(&cid) {
-                comp.params.opening_width = width.clamp(18.0, 400.0);
-                comp.params.opening_height = height.clamp(18.0, 400.0);
-            }
+            && let Some(comp) = self.project.component_mut(&cid)
+        {
+            comp.params.opening_width = width.clamp(18.0, 400.0);
+            comp.params.opening_height = height.clamp(18.0, 400.0);
+        }
         let comps = self.project.components.clone();
         if let Some(wall) = self.project.active_wall_mut() {
             let ww = wall.width;
@@ -561,7 +569,8 @@ impl DollhouseStudioApp {
             Some([px, py]) => (px, py),
             None => {
                 let idx = wall.openings.len();
-                let px = 30.0 + ((idx as f64 * 46.0) % (wall.width - params.opening_width).max(20.0));
+                let px =
+                    30.0 + ((idx as f64 * 46.0) % (wall.width - params.opening_width).max(20.0));
                 let py = if params.style.is_door() {
                     0.0
                 } else {
@@ -589,7 +598,9 @@ impl DollhouseStudioApp {
             self.save_current_project();
             return;
         }
-        if !typing && ctx.input(|i| i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::Z))
+        if !typing
+            && ctx
+                .input(|i| i.modifiers.command && i.modifiers.shift && i.key_pressed(egui::Key::Z))
             || (!typing && ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Y)))
         {
             self.perform_redo();
@@ -599,7 +610,10 @@ impl DollhouseStudioApp {
             self.perform_undo();
             return;
         }
-        if !typing && ctx.input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace)) {
+        if !typing
+            && ctx
+                .input(|i| i.key_pressed(egui::Key::Delete) || i.key_pressed(egui::Key::Backspace))
+        {
             self.delete_selected_openings();
             return;
         }
@@ -701,9 +715,10 @@ impl DollhouseStudioApp {
                     .component(cid)
                     .map(|c| c.name.clone())
                     .unwrap_or_else(|| "Custom Template".into())
-            } else if let (Some(w), Some(oid)) =
-                (self.project.active_wall(), self.selected_opening_ids.first())
-            {
+            } else if let (Some(w), Some(oid)) = (
+                self.project.active_wall(),
+                self.selected_opening_ids.first(),
+            ) {
                 w.openings
                     .iter()
                     .find(|o| &o.id == oid)
@@ -714,7 +729,10 @@ impl DollhouseStudioApp {
             };
             self.save_template_modal.open_for(&sug_name, params);
         } else {
-            self.show_toast("Select an opening or piece first to save as template.", true);
+            self.show_toast(
+                "Select an opening or piece first to save as template.",
+                true,
+            );
         }
     }
 
@@ -723,7 +741,10 @@ impl DollhouseStudioApp {
             return;
         };
         let Some(pdir) = self.project_dir.clone() else {
-            self.show_toast("Save the project folder first before importing photos.", true);
+            self.show_toast(
+                "Save the project folder first before importing photos.",
+                true,
+            );
             return;
         };
         let Some(src) = rfd::FileDialog::new()
@@ -769,7 +790,10 @@ impl DollhouseStudioApp {
 
     fn run_pdf_export(&mut self, scope: PdfExportScope, opts: PdfExportOptions) {
         let default_name = match scope {
-            PdfExportScope::ActivePiece => format!("{}_template.pdf", sanitize_filename(&self.project.manifest.name)),
+            PdfExportScope::ActivePiece => format!(
+                "{}_template.pdf",
+                sanitize_filename(&self.project.manifest.name)
+            ),
             PdfExportScope::ActiveWall => {
                 let wname = self
                     .project
@@ -779,7 +803,10 @@ impl DollhouseStudioApp {
                 format!("{}_1to1.pdf", sanitize_filename(wname))
             }
             PdfExportScope::ProjectBooklet => {
-                format!("{}_booklet.pdf", sanitize_filename(&self.project.manifest.name))
+                format!(
+                    "{}_booklet.pdf",
+                    sanitize_filename(&self.project.manifest.name)
+                )
             }
         };
         let dir = self.default_export_subdir("pdf");
@@ -809,7 +836,9 @@ impl DollhouseStudioApp {
                     return;
                 }
             }
-            PdfExportScope::ProjectBooklet => export_project_booklet_pdf(&self.project, &opts, &path),
+            PdfExportScope::ProjectBooklet => {
+                export_project_booklet_pdf(&self.project, &opts, &path)
+            }
         };
 
         match result {
@@ -826,19 +855,21 @@ impl DollhouseStudioApp {
 
         // Clear expired toast
         if let Some(ref t) = self.toast
-            && Instant::now() > t.expires_at {
-                self.toast = None;
-            }
+            && Instant::now() > t.expires_at
+        {
+            self.toast = None;
+        }
 
         // Silent periodic .autosave every 45s while dirty
         if self.screen == ScreenMode::Editor
             && self.dirty
             && self.project_dir.is_some()
             && self.last_autosave_at.elapsed() >= Duration::from_secs(45)
-            && let Some(ref dir) = self.project_dir {
-                let _ = ProjectStore::write_autosave(dir, &self.project);
-                self.last_autosave_at = Instant::now();
-            }
+            && let Some(ref dir) = self.project_dir
+        {
+            let _ = ProjectStore::write_autosave(dir, &self.project);
+            self.last_autosave_at = Instant::now();
+        }
 
         if self.screen == ScreenMode::WelcomeHub {
             egui::CentralPanel::default().show(ui, |ui| {
@@ -1084,17 +1115,12 @@ impl DollhouseStudioApp {
                     self.project.manifest.display_unit,
                     &mut self.wizard_photo_cache,
                     &mut self.photo_wizard,
-                )
-                    && let Some(w_mut) = self
-                        .project
-                        .walls
-                        .iter_mut()
-                        .find(|w| w.id == wall.id)
-                    {
-                        w_mut.photo = cfg;
-                        self.canvas2d.edit_photo_mode = open_canvas_handles;
-                        self.commit_undo("Calibrate wall photo");
-                    }
+                ) && let Some(w_mut) = self.project.walls.iter_mut().find(|w| w.id == wall.id)
+                {
+                    w_mut.photo = cfg;
+                    self.canvas2d.edit_photo_mode = open_canvas_handles;
+                    self.commit_undo("Calibrate wall photo");
+                }
             } else {
                 self.photo_wizard.open = false;
             }
@@ -1149,20 +1175,20 @@ impl DollhouseStudioApp {
                 .order(egui::Order::Tooltip)
                 .show(&ctx, |ui| {
                     egui::Frame::NONE
-                        .fill(if t.is_error { pal.danger } else { pal.hud_glass })
+                        .fill(if t.is_error {
+                            pal.danger
+                        } else {
+                            pal.hud_glass
+                        })
                         .stroke(Stroke::new(1.0, pal.border_strong))
                         .corner_radius(CornerRadius::same(7))
                         .inner_margin(Margin::symmetric(14, 8))
                         .show(ui, |ui| {
-                            ui.label(
-                                RichText::new(&t.message)
-                                    .strong()
-                                    .color(if t.is_error {
-                                        egui::Color32::WHITE
-                                    } else {
-                                        pal.text_primary
-                                    }),
-                            );
+                            ui.label(RichText::new(&t.message).strong().color(if t.is_error {
+                                egui::Color32::WHITE
+                            } else {
+                                pal.text_primary
+                            }));
                         });
                 });
         }
@@ -1376,18 +1402,20 @@ impl DollhouseStudioApp {
                     if let (Some(wid), Some(oid)) = (
                         self.project.manifest.active_wall_id.clone(),
                         self.selected_opening_ids.first().cloned(),
-                    )
-                        && let Some(cid) = self.project.promote_opening_to_component(&wid, &oid, None) {
-                            self.active_component_id = Some(cid);
-                            self.commit_undo("Promote opening to shared Component");
-                        }
+                    ) && let Some(cid) =
+                        self.project.promote_opening_to_component(&wid, &oid, None)
+                    {
+                        self.active_component_id = Some(cid);
+                        self.commit_undo("Promote opening to shared Component");
+                    }
                 }
                 RibbonAction::ApplyScalePreset(sc) => {
                     self.project.manifest.scale_preset = sc;
                     if self.project.manifest.kind == ProjectKind::SinglePiece
-                        && let Some(p) = self.project.active_piece_mut() {
-                            p.params.apply_scale_preset(sc);
-                        }
+                        && let Some(p) = self.project.active_piece_mut()
+                    {
+                        p.params.apply_scale_preset(sc);
+                    }
                     self.commit_undo("Change scale preset");
                 }
                 RibbonAction::SetFilamentExterior(fc) => {
@@ -1414,9 +1442,10 @@ impl DollhouseStudioApp {
                 }
                 RibbonAction::OpenPhotoWizard => {
                     if let Some(wall) = self.project.active_wall()
-                        && wall.photo.has_photo() {
-                            self.photo_wizard.open_for(&wall.id, &wall.photo);
-                        }
+                        && wall.photo.has_photo()
+                    {
+                        self.photo_wizard.open_for(&wall.id, &wall.photo);
+                    }
                 }
                 RibbonAction::FitPhotoToWall => {
                     if let Some(wall) = self.project.active_wall_mut() {
@@ -1484,7 +1513,11 @@ impl DollhouseStudioApp {
                     self.viewport3d.lock().unwrap().camera.set_preset(preset);
                 }
                 RibbonAction::ResetCamera => {
-                    self.viewport3d.lock().unwrap().camera.set_preset(dh_render::CameraPreset::Isometric);
+                    self.viewport3d
+                        .lock()
+                        .unwrap()
+                        .camera
+                        .set_preset(dh_render::CameraPreset::Isometric);
                 }
                 RibbonAction::SetWallSolid(s) => {
                     self.viewport3d.lock().unwrap().wall_solid = s;
@@ -1542,7 +1575,10 @@ impl DollhouseStudioApp {
             _ => (built.print_plate.clone(), "plate", "Print Plate"),
         };
         let dir = self.default_export_subdir("stl");
-        let name = format!("{}_{suffix}.stl", sanitize_filename(&self.project.manifest.name));
+        let name = format!(
+            "{}_{suffix}.stl",
+            sanitize_filename(&self.project.manifest.name)
+        );
         if let Some(path) = rfd::FileDialog::new()
             .set_directory(&dir)
             .set_file_name(&name)
@@ -1593,7 +1629,10 @@ impl DollhouseStudioApp {
 
     fn export_svg_sheet(&mut self) {
         let dir = self.default_export_subdir("svg");
-        let name = format!("{}_1to1.svg", sanitize_filename(&self.project.manifest.name));
+        let name = format!(
+            "{}_1to1.svg",
+            sanitize_filename(&self.project.manifest.name)
+        );
         let Some(path) = rfd::FileDialog::new()
             .set_directory(&dir)
             .set_file_name(&name)
@@ -1640,7 +1679,11 @@ impl DollhouseStudioApp {
                     self.project.manifest.active_wall_id = Some(wall_id);
                     self.active_component_id = None;
                     if toggle {
-                        if let Some(pos) = self.selected_opening_ids.iter().position(|x| x == &opening_id) {
+                        if let Some(pos) = self
+                            .selected_opening_ids
+                            .iter()
+                            .position(|x| x == &opening_id)
+                        {
                             self.selected_opening_ids.remove(pos);
                         } else {
                             self.selected_opening_ids.push(opening_id);
@@ -1668,12 +1711,14 @@ impl DollhouseStudioApp {
                     let n = self.project.walls.len() + 1;
                     let wt = self.project.manifest.default_wall_thickness;
                     let at = self.project.manifest.default_acetate_thickness;
-                    self.project.add_wall(&format!("Wall {n}"), 380.0, 240.0, wt, at);
+                    self.project
+                        .add_wall(&format!("Wall {n}"), 380.0, 240.0, wt, at);
                     self.selected_opening_ids.clear();
                     self.commit_undo("Add wall");
                 }
                 ExplorerAction::DuplicateWall(wid) => {
-                    if let Some(mut copy) = self.project.walls.iter().find(|w| w.id == wid).cloned() {
+                    if let Some(mut copy) = self.project.walls.iter().find(|w| w.id == wid).cloned()
+                    {
                         copy.id = dh_core::new_id("wall");
                         copy.name = format!("{} Copy", copy.name);
                         for op in &mut copy.openings {
@@ -1697,7 +1742,8 @@ impl DollhouseStudioApp {
                 ExplorerAction::AddStandalonePiece(style) => {
                     let mut p = WindowParams::default();
                     style.apply_style_defaults(&mut p);
-                    let np = StandalonePiece::new(format!("Piece {}", self.project.pieces.len() + 1), p);
+                    let np =
+                        StandalonePiece::new(format!("Piece {}", self.project.pieces.len() + 1), p);
                     let nid = np.id.clone();
                     self.project.pieces.push(np);
                     self.project.manifest.active_piece_id = Some(nid);
@@ -1721,11 +1767,11 @@ impl DollhouseStudioApp {
                         && let Some(oid) = self
                             .project
                             .place_component_instance(&wid, &cid, None, 32.0, 56.0)
-                        {
-                            self.active_component_id = None;
-                            self.selected_opening_ids = vec![oid];
-                            self.commit_undo("Place component instance");
-                        }
+                    {
+                        self.active_component_id = None;
+                        self.selected_opening_ids = vec![oid];
+                        self.commit_undo("Place component instance");
+                    }
                 }
                 ExplorerAction::DuplicateOpening {
                     wall_id,
@@ -1797,20 +1843,22 @@ impl DollhouseStudioApp {
                     } else if let Some(oid) = self.selected_opening_ids.first().cloned() {
                         let mut linked_cid: Option<String> = None;
                         if let Some(w) = self.project.active_wall_mut()
-                            && let Some(op) = w.openings.iter_mut().find(|o| o.id == oid) {
-                                match &mut op.source {
-                                    OpeningSource::Unique { params } => {
-                                        params.apply_style_only_from(&tpl.params);
-                                    }
-                                    OpeningSource::Component { component_id, .. } => {
-                                        linked_cid = Some(component_id.clone());
-                                    }
+                            && let Some(op) = w.openings.iter_mut().find(|o| o.id == oid)
+                        {
+                            match &mut op.source {
+                                OpeningSource::Unique { params } => {
+                                    params.apply_style_only_from(&tpl.params);
+                                }
+                                OpeningSource::Component { component_id, .. } => {
+                                    linked_cid = Some(component_id.clone());
                                 }
                             }
+                        }
                         if let Some(cid) = linked_cid
-                            && let Some(c) = self.project.component_mut(&cid) {
-                                c.params.apply_style_only_from(&tpl.params);
-                            }
+                            && let Some(c) = self.project.component_mut(&cid)
+                        {
+                            c.params.apply_style_only_from(&tpl.params);
+                        }
                         self.commit_undo("Apply template style");
                     }
                 }
@@ -1831,15 +1879,20 @@ impl DollhouseStudioApp {
             match act {
                 InspectorAction::PromoteOpeningToComponent(oid) => {
                     if let Some(wid) = self.project.manifest.active_wall_id.clone()
-                        && self.project.promote_opening_to_component(&wid, &oid, None).is_some() {
-                            self.commit_undo("Promote opening to Component");
-                        }
+                        && self
+                            .project
+                            .promote_opening_to_component(&wid, &oid, None)
+                            .is_some()
+                    {
+                        self.commit_undo("Promote opening to Component");
+                    }
                 }
                 InspectorAction::MakeOpeningUnique(oid) => {
                     if let Some(wid) = self.project.manifest.active_wall_id.clone()
-                        && self.project.make_opening_unique(&wid, &oid) {
-                            self.commit_undo("Make instance unique");
-                        }
+                        && self.project.make_opening_unique(&wid, &oid)
+                    {
+                        self.commit_undo("Make instance unique");
+                    }
                 }
                 InspectorAction::SaveAsTemplate => self.open_save_template_for_selection(),
                 InspectorAction::AutoDimensionWall => {
@@ -1863,9 +1916,10 @@ impl DollhouseStudioApp {
                 }
                 InspectorAction::OpenPhotoWizard => {
                     if let Some(wall) = self.project.active_wall()
-                        && wall.photo.has_photo() {
-                            self.photo_wizard.open_for(&wall.id, &wall.photo);
-                        }
+                        && wall.photo.has_photo()
+                    {
+                        self.photo_wizard.open_for(&wall.id, &wall.photo);
+                    }
                 }
                 InspectorAction::DeleteSelectedOpenings => self.delete_selected_openings(),
                 InspectorAction::AlignSelectedCenterH => {
@@ -1915,11 +1969,12 @@ impl DollhouseStudioApp {
                         let wh = wall.height;
                         for (id, nx, ny) in moves {
                             if let Some(op) = wall.openings.iter_mut().find(|o| o.id == id)
-                                && !op.lock_position {
-                                    op.x_from_left = nx;
-                                    op.y_from_bottom = ny;
-                                    op.clamp_to_wall(ww, wh, &comps);
-                                }
+                                && !op.lock_position
+                            {
+                                op.x_from_left = nx;
+                                op.y_from_bottom = ny;
+                                op.clamp_to_wall(ww, wh, &comps);
+                            }
                         }
                         self.dirty = true;
                     }
@@ -1931,7 +1986,13 @@ impl DollhouseStudioApp {
                     width,
                     height,
                 } => {
-                    self.resize_opening_by_id(&opening_id, x_from_left, y_from_bottom, width, height);
+                    self.resize_opening_by_id(
+                        &opening_id,
+                        x_from_left,
+                        y_from_bottom,
+                        width,
+                        height,
+                    );
                     self.dirty = true;
                 }
                 BlueprintAction::ResizeWall { width, height } => {
@@ -1945,11 +2006,7 @@ impl DollhouseStudioApp {
                         self.dirty = true;
                     }
                 }
-                BlueprintAction::DropStyle {
-                    style,
-                    x_mm,
-                    y_mm,
-                } => {
+                BlueprintAction::DropStyle { style, x_mm, y_mm } => {
                     let mut p = WindowParams::default();
                     style.apply_style_defaults(&mut p);
                     self.insert_params_onto_active_wall(style.name(), p, Some([x_mm, y_mm]));
@@ -1966,11 +2023,12 @@ impl DollhouseStudioApp {
                             None,
                             x_mm,
                             y_mm,
-                        ) {
-                            self.active_component_id = None;
-                            self.selected_opening_ids = vec![oid];
-                            self.commit_undo("Drop component instance");
-                        }
+                        )
+                    {
+                        self.active_component_id = None;
+                        self.selected_opening_ids = vec![oid];
+                        self.commit_undo("Drop component instance");
+                    }
                 }
                 BlueprintAction::DropTemplate {
                     template,
@@ -1978,11 +2036,7 @@ impl DollhouseStudioApp {
                     y_mm,
                 } => {
                     let tpl = *template;
-                    self.insert_params_onto_active_wall(
-                        &tpl.name,
-                        tpl.params,
-                        Some([x_mm, y_mm]),
-                    );
+                    self.insert_params_onto_active_wall(&tpl.name, tpl.params, Some([x_mm, y_mm]));
                 }
                 BlueprintAction::QuickAction(qa) => match qa {
                     QuickBarAction::Duplicate => self.duplicate_selected_openings(),
@@ -1990,33 +2044,40 @@ impl DollhouseStudioApp {
                         if let (Some(wid), Some(oid)) = (
                             self.project.manifest.active_wall_id.clone(),
                             self.selected_opening_ids.first().cloned(),
-                        )
-                            && self.project.promote_opening_to_component(&wid, &oid, None).is_some() {
-                                self.commit_undo("Promote opening to Component");
-                            }
+                        ) && self
+                            .project
+                            .promote_opening_to_component(&wid, &oid, None)
+                            .is_some()
+                        {
+                            self.commit_undo("Promote opening to Component");
+                        }
                     }
                     QuickBarAction::MakeUnique => {
                         if let (Some(wid), Some(oid)) = (
                             self.project.manifest.active_wall_id.clone(),
                             self.selected_opening_ids.first().cloned(),
-                        )
-                            && self.project.make_opening_unique(&wid, &oid) {
-                                self.commit_undo("Make instance unique");
-                            }
+                        ) && self.project.make_opening_unique(&wid, &oid)
+                        {
+                            self.commit_undo("Make instance unique");
+                        }
                     }
                     QuickBarAction::SaveAsTemplate => self.open_save_template_for_selection(),
                     QuickBarAction::ToggleLock => {
                         if let (Some(wall), Some(oid)) = (
                             self.project.active_wall_mut(),
                             self.selected_opening_ids.first().cloned(),
-                        )
-                            && let Some(op) = wall.openings.iter_mut().find(|o| o.id == oid) {
-                                let next = !(op.lock_position || op.lock_width || op.lock_height);
-                                op.lock_position = next;
-                                op.lock_width = next;
-                                op.lock_height = next;
-                                self.commit_undo(if next { "Lock opening" } else { "Unlock opening" });
-                            }
+                        ) && let Some(op) = wall.openings.iter_mut().find(|o| o.id == oid)
+                        {
+                            let next = !(op.lock_position || op.lock_width || op.lock_height);
+                            op.lock_position = next;
+                            op.lock_width = next;
+                            op.lock_height = next;
+                            self.commit_undo(if next {
+                                "Lock opening"
+                            } else {
+                                "Unlock opening"
+                            });
+                        }
                     }
                     QuickBarAction::Inspect3D => {
                         self.viewport = ActiveViewport::Piece3D;
@@ -2025,9 +2086,10 @@ impl DollhouseStudioApp {
                 },
                 BlueprintAction::OpenPhotoWizard => {
                     if let Some(wall) = self.project.active_wall()
-                        && wall.photo.has_photo() {
-                            self.photo_wizard.open_for(&wall.id, &wall.photo);
-                        }
+                        && wall.photo.has_photo()
+                    {
+                        self.photo_wizard.open_for(&wall.id, &wall.photo);
+                    }
                 }
                 BlueprintAction::CommitUndo(lbl) => {
                     self.commit_undo(lbl);
@@ -2044,9 +2106,10 @@ impl eframe::App for DollhouseStudioApp {
 
     fn on_exit(&mut self, gl: Option<&eframe::glow::Context>) {
         if let Some(gl_ctx) = gl
-            && let Ok(mut st) = self.viewport3d.lock() {
-                st.destroy_gl(gl_ctx);
-            }
+            && let Ok(mut st) = self.viewport3d.lock()
+        {
+            st.destroy_gl(gl_ctx);
+        }
     }
 }
 

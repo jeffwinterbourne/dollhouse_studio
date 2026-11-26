@@ -5,19 +5,20 @@ pub mod quick_bar;
 
 use crate::canvas2d::dimensions::{DimensionToolState, interact_and_draw_dimensions};
 use crate::canvas2d::openings::{
-    OpeningsInteraction, OpeningsInteractionState, interact_and_draw_openings,
-    opening_screen_rect,
-};
-use crate::canvas2d::photo_layer::{
-    BlueprintXform, PhotoLayerState, draw_caliper_control_bar,
-    interact_photo_overlay, paint_photo_underlay,
+    OpeningsInteraction, OpeningsInteractionState, interact_and_draw_openings, opening_screen_rect,
 };
 pub use crate::canvas2d::photo_layer::PhotoCanvasTool;
+use crate::canvas2d::photo_layer::{
+    BlueprintXform, PhotoLayerState, draw_caliper_control_bar, interact_photo_overlay,
+    paint_photo_underlay,
+};
 use crate::canvas2d::quick_bar::{QuickBarAction, draw_opening_quick_bar};
 use crate::photo_cache::WallPhotoTextureCache;
 use crate::theme::StudioPalette;
 use dh_core::{ComponentDef, DisplayUnit, PieceTemplate, ProjectWall, WindowStyle};
-use eframe::egui::{self, Align2, Color32, FontId, Pos2, Rect, RichText, Sense, Stroke, StrokeKind};
+use eframe::egui::{
+    self, Align2, Color32, FontId, Pos2, Rect, RichText, Sense, Stroke, StrokeKind,
+};
 
 #[derive(Debug, Clone)]
 pub enum CanvasDragPayload {
@@ -123,7 +124,10 @@ pub fn draw_blueprint_2d(
     // Reserve optional 24px engineering rulers on Top and Left edges.
     let ruler_thick = if state.show_rulers { 22.0 } else { 0.0 };
     let canvas_rect = Rect::from_min_max(
-        Pos2::new(full_rect.left() + ruler_thick, full_rect.top() + ruler_thick),
+        Pos2::new(
+            full_rect.left() + ruler_thick,
+            full_rect.top() + ruler_thick,
+        ),
         full_rect.right_bottom(),
     );
 
@@ -217,7 +221,11 @@ pub fn draw_blueprint_2d(
     painter.text(
         Pos2::new(wall_rect.left(), wall_rect.top() - 8.0),
         Align2::LEFT_BOTTOM,
-        format!("{}  ({})", wall.name, unit.format_dims(wall.width, wall.height)),
+        format!(
+            "{}  ({})",
+            wall.name,
+            unit.format_dims(wall.width, wall.height)
+        ),
         FontId::proportional(12.5),
         pal.wall_stroke,
     );
@@ -225,66 +233,73 @@ pub fn draw_blueprint_2d(
     // Drag-and-drop drop target from Explorer / Design gallery!
     if let Some(payload) = egui::DragAndDrop::payload::<CanvasDragPayload>(ui.ctx())
         && let Some(pos) = pointer_pos
-            && canvas_rect.contains(pos) {
-                let mm = xform.screen_to_mm(pos);
-                let (gw, gh, label) = match &*payload {
-                    CanvasDragPayload::Style(s) => {
-                        let mut p = dh_core::WindowParams::default();
-                        s.apply_style_defaults(&mut p);
-                        (p.opening_width, p.opening_height, s.name().to_string())
-                    }
-                    CanvasDragPayload::Component(cid) => {
-                        if let Some(c) = components.iter().find(|c| &c.id == cid) {
-                            (c.params.opening_width, c.params.opening_height, c.name.clone())
-                        } else {
-                            (60.0, 90.0, "Component".into())
-                        }
-                    }
-                    CanvasDragPayload::Template(t) => {
-                        (t.params.opening_width, t.params.opening_height, t.name.clone())
-                    }
-                };
-                let gx = (mm[0] - gw * 0.5).clamp(0.0, (wall.width - gw).max(0.0));
-                let gy = (mm[1] - gh * 0.5).clamp(0.0, (wall.height - gh).max(0.0));
-                let ghost = Rect::from_min_max(
-                    xform.mm_to_screen([gx, gy + gh]),
-                    xform.mm_to_screen([gx + gw, gy]),
-                );
-                painter.rect_filled(ghost, 2.0, pal.accent.linear_multiply(0.22));
-                painter.rect_stroke(ghost, 2.0, Stroke::new(2.0, pal.gold), StrokeKind::Outside);
-                painter.text(
-                    ghost.center(),
-                    Align2::CENTER_CENTER,
-                    label,
-                    FontId::proportional(11.5),
-                    pal.gold,
-                );
-
-                if ui.input(|i| i.pointer.primary_released()) {
-                    match &*payload {
-                        CanvasDragPayload::Style(s) => actions.push(BlueprintAction::DropStyle {
-                            style: *s,
-                            x_mm: gx,
-                            y_mm: gy,
-                        }),
-                        CanvasDragPayload::Component(cid) => {
-                            actions.push(BlueprintAction::DropComponent {
-                                component_id: cid.clone(),
-                                x_mm: gx,
-                                y_mm: gy,
-                            });
-                        }
-                        CanvasDragPayload::Template(tpl) => {
-                            actions.push(BlueprintAction::DropTemplate {
-                                template: tpl.clone(),
-                                x_mm: gx,
-                                y_mm: gy,
-                            });
-                        }
-                    }
-                    egui::DragAndDrop::clear_payload(ui.ctx());
+        && canvas_rect.contains(pos)
+    {
+        let mm = xform.screen_to_mm(pos);
+        let (gw, gh, label) = match &*payload {
+            CanvasDragPayload::Style(s) => {
+                let mut p = dh_core::WindowParams::default();
+                s.apply_style_defaults(&mut p);
+                (p.opening_width, p.opening_height, s.name().to_string())
+            }
+            CanvasDragPayload::Component(cid) => {
+                if let Some(c) = components.iter().find(|c| &c.id == cid) {
+                    (
+                        c.params.opening_width,
+                        c.params.opening_height,
+                        c.name.clone(),
+                    )
+                } else {
+                    (60.0, 90.0, "Component".into())
                 }
             }
+            CanvasDragPayload::Template(t) => (
+                t.params.opening_width,
+                t.params.opening_height,
+                t.name.clone(),
+            ),
+        };
+        let gx = (mm[0] - gw * 0.5).clamp(0.0, (wall.width - gw).max(0.0));
+        let gy = (mm[1] - gh * 0.5).clamp(0.0, (wall.height - gh).max(0.0));
+        let ghost = Rect::from_min_max(
+            xform.mm_to_screen([gx, gy + gh]),
+            xform.mm_to_screen([gx + gw, gy]),
+        );
+        painter.rect_filled(ghost, 2.0, pal.accent.linear_multiply(0.22));
+        painter.rect_stroke(ghost, 2.0, Stroke::new(2.0, pal.gold), StrokeKind::Outside);
+        painter.text(
+            ghost.center(),
+            Align2::CENTER_CENTER,
+            label,
+            FontId::proportional(11.5),
+            pal.gold,
+        );
+
+        if ui.input(|i| i.pointer.primary_released()) {
+            match &*payload {
+                CanvasDragPayload::Style(s) => actions.push(BlueprintAction::DropStyle {
+                    style: *s,
+                    x_mm: gx,
+                    y_mm: gy,
+                }),
+                CanvasDragPayload::Component(cid) => {
+                    actions.push(BlueprintAction::DropComponent {
+                        component_id: cid.clone(),
+                        x_mm: gx,
+                        y_mm: gy,
+                    });
+                }
+                CanvasDragPayload::Template(tpl) => {
+                    actions.push(BlueprintAction::DropTemplate {
+                        template: tpl.clone(),
+                        x_mm: gx,
+                        y_mm: gy,
+                    });
+                }
+            }
+            egui::DragAndDrop::clear_payload(ui.ctx());
+        }
+    }
 
     // Mode routing: Photo Editing vs Annotate Dimensions vs Wall & Openings Editing.
     let mut consumed_by_photo = false;
@@ -344,7 +359,8 @@ pub fn draw_blueprint_2d(
         actions.push(BlueprintAction::CommitUndo(lbl));
     }
 
-    let allow_openings = !state.edit_photo_mode && !state.dims.active_draw_mode && !d_out.consumed_pointer;
+    let allow_openings =
+        !state.edit_photo_mode && !state.dims.active_draw_mode && !d_out.consumed_pointer;
     let op_events = interact_and_draw_openings(
         ui,
         &painter,
@@ -434,9 +450,10 @@ pub fn draw_blueprint_2d(
                 selected_ids.len(),
                 is_comp,
                 any_locked,
-            ) {
-                actions.push(BlueprintAction::QuickAction(qa));
-            }
+            )
+        {
+            actions.push(BlueprintAction::QuickAction(qa));
+        }
     }
 
     // Paint engineering rulers along top & left margins.
@@ -485,7 +502,10 @@ fn draw_unit_grid(
         for i in sx0..=sx1 {
             let x = xform.mm_to_screen([i as f64 * minor, 0.0]).x;
             painter.line_segment(
-                [Pos2::new(x, xform.canvas_rect.top()), Pos2::new(x, xform.canvas_rect.bottom())],
+                [
+                    Pos2::new(x, xform.canvas_rect.top()),
+                    Pos2::new(x, xform.canvas_rect.bottom()),
+                ],
                 Stroke::new(1.0, pal.canvas_grid_minor),
             );
         }
@@ -494,7 +514,10 @@ fn draw_unit_grid(
         for j in sy0..=sy1 {
             let y = xform.mm_to_screen([0.0, j as f64 * minor]).y;
             painter.line_segment(
-                [Pos2::new(xform.canvas_rect.left(), y), Pos2::new(xform.canvas_rect.right(), y)],
+                [
+                    Pos2::new(xform.canvas_rect.left(), y),
+                    Pos2::new(xform.canvas_rect.right(), y),
+                ],
                 Stroke::new(1.0, pal.canvas_grid_minor),
             );
         }
@@ -505,7 +528,10 @@ fn draw_unit_grid(
     for i in mx0..=mx1 {
         let x = xform.mm_to_screen([i as f64 * major, 0.0]).x;
         painter.line_segment(
-            [Pos2::new(x, xform.canvas_rect.top()), Pos2::new(x, xform.canvas_rect.bottom())],
+            [
+                Pos2::new(x, xform.canvas_rect.top()),
+                Pos2::new(x, xform.canvas_rect.bottom()),
+            ],
             Stroke::new(1.0, pal.canvas_grid_major),
         );
     }
@@ -514,7 +540,10 @@ fn draw_unit_grid(
     for j in my0..=my1 {
         let y = xform.mm_to_screen([0.0, j as f64 * major]).y;
         painter.line_segment(
-            [Pos2::new(xform.canvas_rect.left(), y), Pos2::new(xform.canvas_rect.right(), y)],
+            [
+                Pos2::new(xform.canvas_rect.left(), y),
+                Pos2::new(xform.canvas_rect.right(), y),
+            ],
             Stroke::new(1.0, pal.canvas_grid_major),
         );
     }
@@ -561,7 +590,10 @@ fn draw_rulers(
         let sx = xform.mm_to_screen([v_mm, 0.0]).x;
         if sx >= canvas_rect.left() && sx <= canvas_rect.right() {
             rp.line_segment(
-                [Pos2::new(sx, top_rect.bottom() - 6.0), Pos2::new(sx, top_rect.bottom())],
+                [
+                    Pos2::new(sx, top_rect.bottom() - 6.0),
+                    Pos2::new(sx, top_rect.bottom()),
+                ],
                 Stroke::new(1.0, pal.border_strong),
             );
             let txt = format!("{:.0}", unit.from_mm(v_mm));
@@ -582,7 +614,10 @@ fn draw_rulers(
         let sy = xform.mm_to_screen([0.0, v_mm]).y;
         if sy >= canvas_rect.top() && sy <= canvas_rect.bottom() {
             rp.line_segment(
-                [Pos2::new(left_rect.right() - 6.0, sy), Pos2::new(left_rect.right(), sy)],
+                [
+                    Pos2::new(left_rect.right() - 6.0, sy),
+                    Pos2::new(left_rect.right(), sy),
+                ],
                 Stroke::new(1.0, pal.border_strong),
             );
             let txt = format!("{:.0}", unit.from_mm(v_mm));

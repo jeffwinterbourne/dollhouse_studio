@@ -367,7 +367,8 @@ impl Project {
         } else {
             InstanceOverrides::default()
         };
-        let mut op = WallOpening::new_instance(inst_name, x_from_left, y_from_bottom, comp.id, overrides);
+        let mut op =
+            WallOpening::new_instance(inst_name, x_from_left, y_from_bottom, comp.id, overrides);
         op.clamp_to_wall(wall_w, wall_h, &self.components);
         let oid = op.id.clone();
         self.walls[wall_idx].openings.push(op);
@@ -440,7 +441,10 @@ impl Project {
         if self.manifest.kind == ProjectKind::MultiWall {
             return self.manifest.active_wall_id.clone();
         }
-        let piece = self.active_piece().cloned().or_else(|| self.pieces.first().cloned())?;
+        let piece = self
+            .active_piece()
+            .cloned()
+            .or_else(|| self.pieces.first().cloned())?;
         let mut wall = ProjectWall::new_default("Front Wall");
         wall.wall_thickness = piece.params.wall_thickness;
         wall.acetate_thickness = piece.params.acetate_thickness;

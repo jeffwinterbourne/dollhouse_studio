@@ -79,7 +79,12 @@ pub fn profile_contour(
     arc_segments: usize,
 ) -> Contour2D {
     match kind {
-        ProfileKind::Rectangle => rect_centered(0.0, 0.0, (w + 2.0 * offset).max(0.5), (h + 2.0 * offset).max(0.5)),
+        ProfileKind::Rectangle => rect_centered(
+            0.0,
+            0.0,
+            (w + 2.0 * offset).max(0.5),
+            (h + 2.0 * offset).max(0.5),
+        ),
         ProfileKind::RoundArch => {
             let rx_base = w * 0.5;
             let ry_base = (w * 0.5).min(h * 0.72);
@@ -233,7 +238,8 @@ pub fn union_shapes(a: &Shapes2D, b: &Shapes2D) -> Shapes2D {
     if b.is_empty() {
         return a.clone();
     }
-    FloatOverlay::<Pt2, i64>::from_subj_and_clip(a, b).overlay(OverlayRule::Union, FillRule::EvenOdd)
+    FloatOverlay::<Pt2, i64>::from_subj_and_clip(a, b)
+        .overlay(OverlayRule::Union, FillRule::EvenOdd)
 }
 
 /// Computes `a \ b` (exact 2D boolean difference).

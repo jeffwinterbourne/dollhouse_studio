@@ -23,10 +23,14 @@ pub struct NewProjectWizardState {
 impl NewProjectWizardState {
     pub fn default_root() -> PathBuf {
         if let Ok(profile) = std::env::var("USERPROFILE") {
-            return PathBuf::from(profile).join("Documents").join("DollhouseProjects");
+            return PathBuf::from(profile)
+                .join("Documents")
+                .join("DollhouseProjects");
         }
         if let Ok(home) = std::env::var("HOME") {
-            return PathBuf::from(home).join("Documents").join("DollhouseProjects");
+            return PathBuf::from(home)
+                .join("Documents")
+                .join("DollhouseProjects");
         }
         PathBuf::from("DollhouseProjects")
     }

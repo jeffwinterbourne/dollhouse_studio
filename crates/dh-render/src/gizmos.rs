@@ -122,11 +122,7 @@ pub fn handle_and_draw_wall_gizmos(
     }
 
     let handles = [
-        (
-            GizmoHandle::Move,
-            c_pos,
-            !op.lock_position,
-        ),
+        (GizmoHandle::Move, c_pos, !op.lock_position),
         (
             GizmoHandle::North,
             camera
@@ -285,10 +281,7 @@ pub fn handle_and_draw_wall_gizmos(
     let painter = ui.painter_at(rect);
     let gold = Color32::from_rgb(245, 198, 108);
     let accent = Color32::from_rgb(88, 190, 250);
-    painter.add(egui::Shape::closed_line(
-        corners_2d,
-        Stroke::new(1.5, gold),
-    ));
+    painter.add(egui::Shape::closed_line(corners_2d, Stroke::new(1.5, gold)));
 
     for (h, p, enabled) in handles {
         if !enabled {

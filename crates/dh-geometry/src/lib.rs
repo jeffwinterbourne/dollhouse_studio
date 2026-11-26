@@ -9,9 +9,8 @@ pub use builders::{
     profile_kind,
 };
 pub use extrude::{
-    HingeFace, MeshDiagnostics, MouldingConfig, Slab, TriMesh, VGroove,
-    build_cone_knuckle_block, extrude_slabs, extrude_slabs_with_base_chamfer,
-    extrude_slabs_with_moulding,
+    HingeFace, MeshDiagnostics, MouldingConfig, Slab, TriMesh, VGroove, build_cone_knuckle_block,
+    extrude_slabs, extrude_slabs_with_base_chamfer, extrude_slabs_with_moulding,
 };
 pub use polygon2d::{
     Contour2D, ProfileKind, Pt2, Shape2D, Shapes2D, circle_contour, contour_is_simple,

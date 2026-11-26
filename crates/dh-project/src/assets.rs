@@ -8,7 +8,10 @@ const ALLOWED_EXTENSIONS: [&str; 5] = ["png", "jpg", "jpeg", "bmp", "ico"];
 /// and returns the portable relative POSIX path (e.g. `"assets/photos/front_wall.jpg"`).
 pub fn import_wall_photo(project_dir: &Path, source_path: &Path) -> Result<String, String> {
     if !source_path.is_file() {
-        return Err(format!("Photo file does not exist: {}", source_path.display()));
+        return Err(format!(
+            "Photo file does not exist: {}",
+            source_path.display()
+        ));
     }
     let ext = source_path
         .extension()
