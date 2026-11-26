@@ -65,7 +65,18 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist, portable | Out-Null
           Copy-Item target\release\dollhouse-studio.exe, LICENSE, README.md portable\
           Compress-Archive -Path portable\* -DestinationPath "dist\dollhouse-studio-v$v-windows-x64-portable.zip" -Force
-          makensis "-DVERSION=$v" packaging\windows\installer.nsi
+          $makensis = (Get-Command makensis -ErrorAction SilentlyContinue).Source
+          if (-not $makensis -and (Test-Path "${env:ProgramFiles(x86)}\NSIS\makensis.exe")) {
+            $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe"
+          }
+          if (-not $makensis) {
+            choco install nsis --no-progress -y
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+            $makensis = (Get-Command makensis -ErrorAction SilentlyContinue).Source
+            if (-not $makensis) { $makensis = "${env:ProgramFiles(x86)}\NSIS\makensis.exe" }
+          }
+          & $makensis "-DVERSION=$v" packaging\windows\installer.nsi
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
       - uses: actions/upload-artifact@v4
         with:
           name: windows-artifacts
