@@ -10,3 +10,4 @@ repository.workspace = true
 dh-core.workspace = true
 dh-geometry.workspace = true
 glam.workspace = true
+serde_json.workspace = true

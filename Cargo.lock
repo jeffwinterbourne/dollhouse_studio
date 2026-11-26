@@ -606,6 +606,7 @@ dependencies = [
  "dh-core",
  "dh-geometry",
  "glam",
+ "serde_json",
 ]
 
 [[package]]
