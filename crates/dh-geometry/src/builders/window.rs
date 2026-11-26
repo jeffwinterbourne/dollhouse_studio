@@ -806,12 +806,16 @@ pub fn build_window(raw_params: &WindowParams) -> GeneratedWindow {
         hole_chamfer: bar_c,
         grooves: ext_grooves,
         top_grooves: Vec::new(),
+        open_grooves: Vec::new(),
+        top_open_grooves: Vec::new(),
     };
     let int_moulding = MouldingConfig {
         outer_chamfer: int_outer_chamfer,
         hole_chamfer: bar_c,
         grooves: int_grooves,
         top_grooves: Vec::new(),
+        open_grooves: Vec::new(),
+        top_open_grooves: Vec::new(),
     };
 
     if params.style.is_door() {
@@ -1757,6 +1761,8 @@ fn build_one_cone_hinged_sash(
             hole_chamfer: bar_c,
             grooves: Vec::new(),
             top_grooves: Vec::new(),
+            open_grooves: Vec::new(),
+            top_open_grooves: Vec::new(),
         },
     );
     sash_mesh.append(&sock_k0);

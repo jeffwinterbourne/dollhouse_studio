@@ -537,6 +537,7 @@ fn door_panelling_survives_letterbox_and_cat_flap_additions() {
             params.door_thickness = door_t;
             params.door_interior_panels = true;
             params.letterbox_enabled = true;
+            params.letterbox_height_ratio = 0.62;
             params.cat_flap_enabled = true;
 
             let win = build_window(&params);
@@ -572,5 +573,54 @@ fn door_panelling_survives_letterbox_and_cat_flap_additions() {
                 );
             }
         }
+    }
+
+    // Verify 6-panel exterior outline bounds remain invariant & symmetric when letterbox/cat-flap intersect grooves
+    let mut base_p = WindowParams::default();
+    WindowStyle::DoorGeorgian6Panel.apply_style_defaults(&mut base_p);
+    base_p.door_interior_panels = true;
+    let base_win = build_window(&base_p);
+
+    for lb_ratio in [0.48, 0.62, 0.25] {
+        let mut add_p = base_p.clone();
+        add_p.letterbox_enabled = true;
+        add_p.letterbox_height_ratio = lb_ratio;
+        add_p.cat_flap_enabled = true;
+        let add_win = build_window(&add_p);
+        assert!(
+            add_win.printable_ok,
+            "Printable check failed for 6-panel lb_ratio={lb_ratio}"
+        );
+
+        let groove_xy_bounds = |w: &dh_geometry::GeneratedWindow| {
+            let mesh = &w.door_leaves[0].mesh;
+            let t = w.door_leaves[0].leaf_thickness;
+            let mut min_x = f32::INFINITY;
+            let mut max_x = f32::NEG_INFINITY;
+            let mut min_y = f32::INFINITY;
+            let mut max_y = f32::NEG_INFINITY;
+            for p in &mesh.positions {
+                if p[2] > t - 1.0 && p[2] < t - 0.08 {
+                    min_x = min_x.min(p[0]);
+                    max_x = max_x.max(p[0]);
+                    min_y = min_y.min(p[1]);
+                    max_y = max_y.max(p[1]);
+                }
+            }
+            (min_x, max_x, min_y, max_y)
+        };
+        let (bx0, bx1, by0, by1) = groove_xy_bounds(&base_win);
+        let (ax0, ax1, ay0, ay1) = groove_xy_bounds(&add_win);
+        assert!(
+            (bx0 + bx1).abs() < 0.05,
+            "Panels must be centered symmetrically: {bx0}..{bx1}"
+        );
+        assert!(
+            (bx0 - ax0).abs() < 0.05
+                && (bx1 - ax1).abs() < 0.05
+                && (by0 - ay0).abs() < 0.05
+                && (by1 - ay1).abs() < 0.05,
+            "6-panel bounds shifted when letterbox (ratio={lb_ratio}) + cat flap added: base=({bx0:.2},{bx1:.2},{by0:.2},{by1:.2}) vs add=({ax0:.2},{ax1:.2},{ay0:.2},{ay1:.2})"
+        );
     }
 }

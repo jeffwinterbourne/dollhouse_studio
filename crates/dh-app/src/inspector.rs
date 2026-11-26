@@ -263,9 +263,12 @@ pub fn draw_piece_inspector_body(
                     });
             });
             if ui
-                .checkbox(&mut params.door_interior_panels, "Interior Panelling")
+                .checkbox(
+                    &mut params.door_interior_panels,
+                    "Panelling on Interior Side",
+                )
                 .on_hover_text(
-                    "Also carve decorative recessed panelling on the interior side of the door",
+                    "Also carve matching decorative panelling on the interior side of the door",
                 )
                 .changed()
             {

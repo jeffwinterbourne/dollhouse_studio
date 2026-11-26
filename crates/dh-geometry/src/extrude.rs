@@ -1,6 +1,6 @@
 use crate::polygon2d::{
-    Contour2D, Pt2, Shape2D, Shapes2D, difference_shapes, intersection_shapes, miter_inset_contour,
-    miter_offset_contour,
+    Contour2D, Pt2, Shape2D, Shapes2D, contour_is_simple, difference_shapes, intersection_shapes,
+    miter_inset_contour, miter_offset_contour,
 };
 use glam::Vec3;
 use i_triangle::float::triangulatable::Triangulatable;
@@ -36,6 +36,10 @@ pub struct MouldingConfig {
     pub grooves: Vec<VGroove>,
     /// Closed V-grooves cut downward into the top horizontal cap (`last.z1`).
     pub top_grooves: Vec<VGroove>,
+    /// Open-polyline V-grooves cut upward into the `z = 0` face (with 41° mitered bends & tapered end-caps).
+    pub open_grooves: Vec<VGroove>,
+    /// Open-polyline V-grooves cut downward into the top horizontal cap (`last.z1`).
+    pub top_open_grooves: Vec<VGroove>,
 }
 
 /// Indexed watertight triangle mesh in millimeters (`Z` up).
@@ -296,6 +300,8 @@ pub fn extrude_slabs_with_base_chamfer(
             hole_chamfer: None,
             grooves: Vec::new(),
             top_grooves: Vec::new(),
+            open_grooves: Vec::new(),
+            top_open_grooves: Vec::new(),
         },
     )
 }
@@ -383,7 +389,8 @@ pub fn extrude_slabs_with_moulding(raw_slabs: &[Slab], moulding: &MouldingConfig
 
     let has_moulding = moulding.outer_chamfer.is_some()
         || moulding.hole_chamfer.is_some()
-        || !moulding.grooves.is_empty();
+        || !moulding.grooves.is_empty()
+        || !moulding.open_grooves.is_empty();
 
     let moulding_applied = if has_moulding && slabs[0].region.len() == 1 {
         let z0 = slabs[0].z0;
@@ -440,14 +447,22 @@ pub fn extrude_slabs_with_moulding(raw_slabs: &[Slab], moulding: &MouldingConfig
         }
         let mut bot_shapes: Shapes2D = vec![bot_shape];
 
-        // Prepare valid V-grooves that stay inside the base solid
+        // Prepare valid closed and open-polyline V-grooves that stay inside the base solid
         struct BuiltGroove {
             centerline: Contour2D,
             outer: Contour2D,
             inner: Contour2D,
             z_apex: f64,
         }
+        struct BuiltOpenGroove {
+            q: Vec<Pt2>,
+            r: Vec<Pt2>,
+            l: Vec<Pt2>,
+            poly: Contour2D,
+            z_apex: f64,
+        }
         let mut built_grooves: Vec<BuiltGroove> = Vec::new();
+        let mut built_open_grooves: Vec<BuiltOpenGroove> = Vec::new();
         let mut groove_bands: Shapes2D = Vec::new();
         for g in &moulding.grooves {
             if g.depth <= 0.05 || g.depth >= slab_h - 0.05 || g.width <= 0.15 {
@@ -475,6 +490,27 @@ pub fn extrude_slabs_with_moulding(raw_slabs: &[Slab], moulding: &MouldingConfig
                 }
             }
         }
+        for g in &moulding.open_grooves {
+            if g.depth <= 0.05 || g.depth >= slab_h - 0.05 || g.width <= 0.15 {
+                continue;
+            }
+            if let Some(strip) = build_open_groove_strip(&g.centerline, g.width * 0.5) {
+                let poly_shape = vec![strip.poly.clone()];
+                let poly_shapes = vec![poly_shape.clone()];
+                let fits_inside = difference_shapes(&poly_shapes, &bot_shapes).is_empty();
+                let clear_of_prev = intersection_shapes(&poly_shapes, &groove_bands).is_empty();
+                if fits_inside && clear_of_prev {
+                    groove_bands.push(poly_shape);
+                    built_open_grooves.push(BuiltOpenGroove {
+                        q: strip.q,
+                        r: strip.r,
+                        l: strip.l,
+                        poly: strip.poly,
+                        z_apex: z0 + g.depth,
+                    });
+                }
+            }
+        }
 
         if !groove_bands.is_empty() {
             bot_shapes = difference_shapes(&bot_shapes, &groove_bands);
@@ -491,6 +527,9 @@ pub fn extrude_slabs_with_moulding(raw_slabs: &[Slab], moulding: &MouldingConfig
             for bg in &built_grooves {
                 gpts.extend_from_slice(&bg.outer);
                 gpts.extend_from_slice(&bg.inner);
+            }
+            for og in &built_open_grooves {
+                gpts.extend_from_slice(&og.poly);
             }
             subdivide_shapes(&mut bot_shapes, &gpts);
         }
@@ -526,6 +565,9 @@ pub fn extrude_slabs_with_moulding(raw_slabs: &[Slab], moulding: &MouldingConfig
             emit_tapered_wall(&mut mb, &rev_outer, &rev_mid, z0, bg.z_apex);
             emit_tapered_wall(&mut mb, &bg.inner, &bg.centerline, z0, bg.z_apex);
         }
+        for og in &built_open_grooves {
+            emit_open_groove_walls(&mut mb, &og.q, &og.r, &og.l, z0, og.z_apex, false);
+        }
 
         true
     } else {
@@ -548,9 +590,9 @@ pub fn extrude_slabs_with_moulding(raw_slabs: &[Slab], moulding: &MouldingConfig
         emit_horizontal_cap(&mut mb, step, z, true);
     }
 
-    // Top cap at z_top (normal +Z), with optional downward V-grooves cut into the top surface
+    // Top cap at z_top (normal +Z), with optional downward closed & open-polyline V-grooves
     let last = slabs.last().unwrap();
-    if moulding.top_grooves.is_empty() {
+    if moulding.top_grooves.is_empty() && moulding.top_open_grooves.is_empty() {
         emit_horizontal_cap(&mut mb, &last.region, last.z1, true);
     } else {
         let z_top = last.z1;
@@ -563,7 +605,15 @@ pub fn extrude_slabs_with_moulding(raw_slabs: &[Slab], moulding: &MouldingConfig
             inner: Contour2D,
             z_apex: f64,
         }
+        struct BuiltTopOpenGroove {
+            q: Vec<Pt2>,
+            r: Vec<Pt2>,
+            l: Vec<Pt2>,
+            poly: Contour2D,
+            z_apex: f64,
+        }
         let mut top_built: Vec<BuiltTopGroove> = Vec::new();
+        let mut top_open_built: Vec<BuiltTopOpenGroove> = Vec::new();
         let mut top_bands: Shapes2D = Vec::new();
 
         for g in &moulding.top_grooves {
@@ -591,8 +641,29 @@ pub fn extrude_slabs_with_moulding(raw_slabs: &[Slab], moulding: &MouldingConfig
                 }
             }
         }
+        for g in &moulding.top_open_grooves {
+            if g.depth <= 0.05 || g.depth >= top_slab_h - 0.05 || g.width <= 0.15 {
+                continue;
+            }
+            if let Some(strip) = build_open_groove_strip(&g.centerline, g.width * 0.5) {
+                let poly_shape = vec![strip.poly.clone()];
+                let poly_shapes = vec![poly_shape.clone()];
+                let fits_inside = difference_shapes(&poly_shapes, &top_shapes).is_empty();
+                let clear_of_prev = intersection_shapes(&poly_shapes, &top_bands).is_empty();
+                if fits_inside && clear_of_prev {
+                    top_bands.push(poly_shape);
+                    top_open_built.push(BuiltTopOpenGroove {
+                        q: strip.q,
+                        r: strip.r,
+                        l: strip.l,
+                        poly: strip.poly,
+                        z_apex: z_top - g.depth,
+                    });
+                }
+            }
+        }
 
-        if !top_built.is_empty() {
+        if !top_built.is_empty() || !top_open_built.is_empty() {
             top_shapes = difference_shapes(&top_shapes, &top_bands);
             normalize_shapes_winding(&mut top_shapes);
             let mut tpts: Vec<Pt2> = Vec::new();
@@ -605,6 +676,9 @@ pub fn extrude_slabs_with_moulding(raw_slabs: &[Slab], moulding: &MouldingConfig
                 tpts.extend_from_slice(&bg.outer);
                 tpts.extend_from_slice(&bg.inner);
             }
+            for og in &top_open_built {
+                tpts.extend_from_slice(&og.poly);
+            }
             subdivide_shapes(&mut top_shapes, &tpts);
             emit_horizontal_cap(&mut mb, &top_shapes, z_top, true);
 
@@ -616,12 +690,124 @@ pub fn extrude_slabs_with_moulding(raw_slabs: &[Slab], moulding: &MouldingConfig
                 emit_tapered_wall(&mut mb, &rev_mid, &rev_outer, bg.z_apex, z_top);
                 emit_tapered_wall(&mut mb, &bg.centerline, &bg.inner, bg.z_apex, z_top);
             }
+            for og in &top_open_built {
+                emit_open_groove_walls(&mut mb, &og.q, &og.r, &og.l, z_top, og.z_apex, true);
+            }
         } else {
             emit_horizontal_cap(&mut mb, &last.region, z_top, true);
         }
     }
 
     mb.finish()
+}
+
+struct OpenGrooveStrip {
+    q: Vec<Pt2>,
+    r: Vec<Pt2>,
+    l: Vec<Pt2>,
+    poly: Contour2D,
+}
+
+fn build_open_groove_strip(pts: &[Pt2], hw: f64) -> Option<OpenGrooveStrip> {
+    let mut q: Vec<Pt2> = Vec::with_capacity(pts.len());
+    for &p in pts {
+        if let Some(&prev) = q.last() {
+            let dx = p[0] - prev[0];
+            let dy = p[1] - prev[1];
+            if dx * dx + dy * dy < 1e-8 {
+                continue;
+            }
+        }
+        q.push(p);
+    }
+    if q.len() < 2 {
+        return None;
+    }
+
+    let m = q.len() - 1;
+    let mut u: Vec<Pt2> = Vec::with_capacity(m);
+    let mut n: Vec<Pt2> = Vec::with_capacity(m);
+    for k in 0..m {
+        let dx = q[k + 1][0] - q[k][0];
+        let dy = q[k + 1][1] - q[k][1];
+        let len = (dx * dx + dy * dy).sqrt();
+        if len < 1e-6 {
+            return None;
+        }
+        let uk = [dx / len, dy / len];
+        u.push(uk);
+        n.push([-uk[1], uk[0]]);
+    }
+
+    let mut r = Vec::with_capacity(m + 1);
+    let mut l = Vec::with_capacity(m + 1);
+    r.push([
+        q[0][0] - u[0][0] * hw - n[0][0] * hw,
+        q[0][1] - u[0][1] * hw - n[0][1] * hw,
+    ]);
+    l.push([
+        q[0][0] - u[0][0] * hw + n[0][0] * hw,
+        q[0][1] - u[0][1] * hw + n[0][1] * hw,
+    ]);
+    for k in 1..m {
+        let dot = n[k - 1][0] * n[k][0] + n[k - 1][1] * n[k][1];
+        let denom = (1.0 + dot).max(0.25);
+        let mx = (n[k - 1][0] + n[k][0]) * (hw / denom);
+        let my = (n[k - 1][1] + n[k][1]) * (hw / denom);
+        r.push([q[k][0] - mx, q[k][1] - my]);
+        l.push([q[k][0] + mx, q[k][1] + my]);
+    }
+    r.push([
+        q[m][0] + u[m - 1][0] * hw - n[m - 1][0] * hw,
+        q[m][1] + u[m - 1][1] * hw - n[m - 1][1] * hw,
+    ]);
+    l.push([
+        q[m][0] + u[m - 1][0] * hw + n[m - 1][0] * hw,
+        q[m][1] + u[m - 1][1] * hw + n[m - 1][1] * hw,
+    ]);
+
+    let mut poly = Vec::with_capacity((m + 1) * 2);
+    poly.extend_from_slice(&r);
+    for idx in (0..=m).rev() {
+        poly.push(l[idx]);
+    }
+    if contour_signed_area(&poly) <= 1e-5 || !contour_is_simple(&poly) {
+        return None;
+    }
+
+    Some(OpenGrooveStrip { q, r, l, poly })
+}
+
+fn emit_open_groove_walls(
+    mb: &mut MeshBuilder,
+    q: &[Pt2],
+    r: &[Pt2],
+    l: &[Pt2],
+    z_face: f64,
+    z_apex: f64,
+    face_up: bool,
+) {
+    let m = q.len() - 1;
+    let qv: Vec<u32> = q.iter().map(|p| mb.vertex(p[0], p[1], z_apex)).collect();
+    let rv: Vec<u32> = r.iter().map(|p| mb.vertex(p[0], p[1], z_face)).collect();
+    let lv: Vec<u32> = l.iter().map(|p| mb.vertex(p[0], p[1], z_face)).collect();
+
+    let push = |mb: &mut MeshBuilder, a: u32, b: u32, c: u32| {
+        if face_up {
+            mb.push_tri(a, b, c);
+        } else {
+            mb.push_tri(a, c, b);
+        }
+    };
+
+    for k in 0..m {
+        push(mb, rv[k], rv[k + 1], qv[k + 1]);
+        push(mb, rv[k], qv[k + 1], qv[k]);
+        push(mb, lv[k + 1], lv[k], qv[k]);
+        push(mb, lv[k + 1], qv[k], qv[k + 1]);
+    }
+    push(mb, rv[m], lv[m], qv[m]);
+    push(mb, lv[0], rv[0], qv[0]);
 }
 
 fn contour_signed_area(c: &[Pt2]) -> f64 {
